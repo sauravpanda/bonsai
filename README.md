@@ -4,8 +4,6 @@ A CLI tool for managing git worktrees. `git worktree` is barebones — as AI-ass
 
 Bonsai fixes that.
 
-> Created by [Saurav Panda](https://github.com/sauravpanda)
-
 ---
 
 ## Install
@@ -149,3 +147,7 @@ Without `gh` auth, the PR column shows `?` and prune/clean candidates are based 
 ## License
 
 MIT
+
+---
+
+Made with ♥ by [Saurav Panda](https://github.com/sauravpanda)
