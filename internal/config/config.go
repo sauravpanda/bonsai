@@ -2,7 +2,9 @@ package config
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -22,19 +24,49 @@ func Default() *Config {
 	}
 }
 
+// Load returns the effective configuration using this merge order:
+//  1. Built-in defaults
+//  2. Global config (~/.config/bonsai/config.toml)
+//  3. Per-repo config (.bonsai.toml in git repo root) — wins on any key it specifies
 func Load() (*Config, error) {
 	cfg := Default()
-	p := Path()
-	if _, err := os.Stat(p); os.IsNotExist(err) {
-		return cfg, nil
+
+	// 1. Apply global config.
+	if p := Path(); fileExists(p) {
+		if _, err := toml.DecodeFile(p, cfg); err != nil {
+			return cfg, err
+		}
 	}
-	if _, err := toml.DecodeFile(p, cfg); err != nil {
-		return cfg, err
+
+	// 2. Apply per-repo config (.bonsai.toml at git root), if any.
+	if repoRoot := gitRepoRoot(); repoRoot != "" {
+		repoPath := filepath.Join(repoRoot, ".bonsai.toml")
+		if fileExists(repoPath) {
+			if _, err := toml.DecodeFile(repoPath, cfg); err != nil {
+				return cfg, err
+			}
+		}
 	}
+
 	return cfg, nil
 }
 
+// Path returns the global config file path.
 func Path() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "bonsai", "config.toml")
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// gitRepoRoot returns the top-level directory of the current git repo, or "".
+func gitRepoRoot() string {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
