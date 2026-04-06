@@ -96,7 +96,7 @@ func runSnapshotCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	branch := strings.ReplaceAll(wt.Branch, "/", "-")
-	ts := time.Now().Format("20060102-150405")
+	ts := time.Now().UTC().Format("20060102-150405")
 	archiveName := fmt.Sprintf("%s-%s.tar.gz", branch, ts)
 	archivePath := filepath.Join(dir, archiveName)
 

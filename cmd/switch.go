@@ -127,8 +127,8 @@ func runSwitch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fm := final.(switchModel)
-	if fm.quit || fm.selected == "" {
+	fm, ok := final.(switchModel)
+	if !ok || fm.quit || fm.selected == "" {
 		return nil
 	}
 

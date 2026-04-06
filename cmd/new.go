@@ -65,7 +65,9 @@ func runNew(cmd *cobra.Command, args []string) error {
 	fetchCmd := exec.Command("git", "fetch", cfg.DefaultRemote, base)
 	fetchCmd.Stdout = os.Stdout
 	fetchCmd.Stderr = os.Stderr
-	_ = fetchCmd.Run() // non-fatal if offline
+	if err := fetchCmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: fetch %s/%s failed (offline?): %v\n", cfg.DefaultRemote, base, err)
+	}
 
 	// git worktree add <path> -b <branch> <base>
 	addArgs := []string{"worktree", "add", wtPath, "-b", branch, cfg.DefaultRemote + "/" + base}
