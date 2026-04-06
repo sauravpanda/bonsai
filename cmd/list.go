@@ -12,6 +12,7 @@ import (
 	"github.com/sauravpanda/bonsai/internal/github"
 	"github.com/sauravpanda/bonsai/internal/tui"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 )
 
@@ -91,29 +92,31 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	root, _ := git.MainRoot()
 
-	spin := tui.Start("fetching worktree info…")
-	for i, wt := range worktrees {
-		if len(worktrees) > 1 {
-			spin.UpdateMsg(fmt.Sprintf("enriching worktree %d/%d…", i+1, len(worktrees)))
-		}
-		git.Enrich(wt, cfg.DefaultBase, cfg.DefaultRemote)
-		if ghOK && !wt.IsMain && !wt.IsDetached && wt.Branch != "" {
-			spin.UpdateMsg(fmt.Sprintf("fetching PR status for %s…", wt.Branch))
-			pr, err := github.GetPR(wt.Branch)
-			if err == nil {
-				wt.PRStatus = strings.ToLower(pr.State)
-				wt.PRURL = pr.URL
+	spin := tui.Start(fmt.Sprintf("enriching %d worktree(s) in parallel…", len(worktrees)))
+	var g errgroup.Group
+	for _, wt := range worktrees {
+		wt := wt
+		g.Go(func() error {
+			git.Enrich(wt, cfg.DefaultBase, cfg.DefaultRemote)
+			if ghOK && !wt.IsMain && !wt.IsDetached && wt.Branch != "" {
+				pr, err := github.GetPR(wt.Branch)
+				if err == nil {
+					wt.PRStatus = strings.ToLower(pr.State)
+					wt.PRURL = pr.URL
+				} else {
+					wt.PRStatus = "none"
+				}
+			} else if wt.IsMain {
+				wt.PRStatus = "—"
+			} else if !ghOK {
+				wt.PRStatus = "unknown"
 			} else {
 				wt.PRStatus = "none"
 			}
-		} else if wt.IsMain {
-			wt.PRStatus = "—"
-		} else if !ghOK {
-			wt.PRStatus = "unknown"
-		} else {
-			wt.PRStatus = "none"
-		}
+			return nil
+		})
 	}
+	g.Wait() //nolint:errcheck — goroutines always return nil
 	spin.Stop()
 
 	// Apply --no-pr filter: keep main worktree + added worktrees with no PR.

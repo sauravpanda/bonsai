@@ -11,6 +11,7 @@ import (
 	"github.com/sauravpanda/bonsai/internal/github"
 	"github.com/sauravpanda/bonsai/internal/tui"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var cleanCmd = &cobra.Command{
@@ -58,20 +59,25 @@ func runClean(cmd *cobra.Command, args []string) error {
 	ghOK := !offline && github.IsAvailable()
 	root, _ := git.MainRoot()
 
-	spin := tui.Start("scanning worktrees…")
+	spin := tui.Start(fmt.Sprintf("enriching %d worktree(s) in parallel…", len(worktrees)))
+	var g errgroup.Group
 	for _, wt := range worktrees {
-		git.Enrich(wt, cfg.DefaultBase, cfg.DefaultRemote)
-		if ghOK && !wt.IsMain && !wt.IsDetached && wt.Branch != "" {
-			spin.UpdateMsg(fmt.Sprintf("checking PR status for %s…", wt.Branch))
-			pr, err := github.GetPR(wt.Branch)
-			if err == nil {
-				wt.PRStatus = strings.ToLower(pr.State)
-				wt.PRURL = pr.URL
-			} else {
-				wt.PRStatus = "none"
+		wt := wt
+		g.Go(func() error {
+			git.Enrich(wt, cfg.DefaultBase, cfg.DefaultRemote)
+			if ghOK && !wt.IsMain && !wt.IsDetached && wt.Branch != "" {
+				pr, err := github.GetPR(wt.Branch)
+				if err == nil {
+					wt.PRStatus = strings.ToLower(pr.State)
+					wt.PRURL = pr.URL
+				} else {
+					wt.PRStatus = "none"
+				}
 			}
-		}
+			return nil
+		})
 	}
+	g.Wait() //nolint:errcheck — goroutines always return nil
 	spin.Stop()
 
 	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9 // nanoseconds

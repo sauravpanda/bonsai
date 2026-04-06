@@ -10,6 +10,7 @@ import (
 	"github.com/sauravpanda/bonsai/internal/github"
 	"github.com/sauravpanda/bonsai/internal/tui"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var pruneCmd = &cobra.Command{
@@ -68,24 +69,37 @@ func runPrune(cmd *cobra.Command, args []string) error {
 	root, _ := git.MainRoot()
 	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9
 
-	spin := tui.Start("scanning worktrees…")
-	var candidates []pruneCandidate
+	// Collect non-main worktrees and enrich them in parallel.
+	var added []*git.Worktree
 	for _, wt := range worktrees {
-		if wt.IsMain {
-			continue
+		if !wt.IsMain {
+			added = append(added, wt)
 		}
-		git.Enrich(wt, cfg.DefaultBase, cfg.DefaultRemote)
-		if ghOK && !wt.IsDetached && wt.Branch != "" {
-			spin.UpdateMsg(fmt.Sprintf("checking PR status for %s…", wt.Branch))
-			pr, err := github.GetPR(wt.Branch)
-			if err == nil {
-				wt.PRStatus = strings.ToLower(pr.State)
-				wt.PRURL = pr.URL
-			} else {
-				wt.PRStatus = "none"
-			}
-		}
+	}
 
+	spin := tui.Start(fmt.Sprintf("enriching %d worktree(s) in parallel…", len(added)))
+	var g errgroup.Group
+	for _, wt := range added {
+		wt := wt
+		g.Go(func() error {
+			git.Enrich(wt, cfg.DefaultBase, cfg.DefaultRemote)
+			if ghOK && !wt.IsDetached && wt.Branch != "" {
+				pr, err := github.GetPR(wt.Branch)
+				if err == nil {
+					wt.PRStatus = strings.ToLower(pr.State)
+					wt.PRURL = pr.URL
+				} else {
+					wt.PRStatus = "none"
+				}
+			}
+			return nil
+		})
+	}
+	g.Wait() //nolint:errcheck — goroutines always return nil
+	spin.Stop()
+
+	var candidates []pruneCandidate
+	for _, wt := range added {
 		reasons := candidateReasons(wt, staleDur)
 		if len(reasons) == 0 {
 			continue
@@ -96,7 +110,6 @@ func runPrune(cmd *cobra.Command, args []string) error {
 			path:    git.ShortenPath(wt.Path, root),
 		})
 	}
-	spin.Stop()
 
 	if len(candidates) == 0 {
 		fmt.Println(okStyle.Render("✓") + "  No worktrees to prune.")
