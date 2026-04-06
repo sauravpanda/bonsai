@@ -259,15 +259,25 @@ func padRight(s string, n int) string {
 	return s + strings.Repeat(" ", n-visible)
 }
 
+// hyperlink wraps text in an OSC 8 terminal hyperlink when url is non-empty.
+// Terminals that don't support OSC 8 display the plain text unchanged.
+func hyperlink(url, text string) string {
+	if url == "" {
+		return text
+	}
+	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
+}
+
 func formatPR(wt *git.Worktree) string {
 	switch wt.PRStatus {
 	case "merged":
 		return prMerged.Render("merged")
 	case "open":
+		label := prOpen.Render("open")
 		if wt.PRURL != "" {
-			return prOpen.Render("open")
+			label = hyperlink(wt.PRURL, label)
 		}
-		return prOpen.Render("open")
+		return label
 	case "closed":
 		return prClosed.Render("closed")
 	case "—":
