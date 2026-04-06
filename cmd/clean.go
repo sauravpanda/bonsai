@@ -33,6 +33,7 @@ func init() {
 	cleanCmd.Flags().IntP("stale", "s", 0, "override stale threshold in days")
 	cleanCmd.Flags().Bool("force", false, "force removal even if worktree is dirty")
 	cleanCmd.Flags().Bool("all", false, "show all worktrees, not just candidates")
+	cleanCmd.Flags().Bool("offline", false, "skip GitHub PR status lookup (faster)")
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
@@ -47,13 +48,14 @@ func runClean(cmd *cobra.Command, args []string) error {
 	}
 	force, _ := cmd.Flags().GetBool("force")
 	showAll, _ := cmd.Flags().GetBool("all")
+	offline, _ := cmd.Flags().GetBool("offline")
 
 	worktrees, err := git.List()
 	if err != nil {
 		return err
 	}
 
-	ghOK := github.IsAvailable()
+	ghOK := !offline && github.IsAvailable()
 	root, _ := git.MainRoot()
 
 	spin := tui.Start("scanning worktrees…")
