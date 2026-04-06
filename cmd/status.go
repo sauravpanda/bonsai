@@ -99,10 +99,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			return nil
 		})
 	}
-	g.Wait() //nolint:errcheck
+	if err := g.Wait(); err != nil {
+		return err
+	}
 	spin.Stop()
 
-	root, _ := git.MainRoot()
 	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9
 
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
@@ -113,8 +114,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	for _, s := range statuses {
 		wt := s.wt
-		path := git.ShortenPath(wt.Path, root)
-		_ = path
 
 		branch := wt.Branch
 		if wt.IsMain {
