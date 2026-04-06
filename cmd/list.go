@@ -59,13 +59,6 @@ func computeCols(diffWidth, numWidth int) cols {
 	return cols{path, branch, commit, diffWidth}
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 var (
 	headerStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	mainStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
