@@ -123,16 +123,20 @@ func runPrune(cmd *cobra.Command, args []string) error {
 
 		shouldDelete := autoYes
 		if !autoYes {
-			shouldDelete = confirm("  Delete? [y/N/q] ")
-			// Allow 'q' to quit early — handled by confirm returning false on 'q'
+			yes, quit := confirmOrQuit("  Delete? [y/N/q] ")
+			if quit {
+				fmt.Println("  quitting")
+				break
+			}
+			shouldDelete = yes
 		}
 
 		if shouldDelete {
 			fmt.Printf("  removing ... ")
 			// If the worktree has unpushed commits the user already saw the warning
-		// and confirmed deletion — treat that as implicit force regardless of
-		// whether --yes or --force was passed.
-		useForce := force || c.wt.HasUnpushed
+			// and confirmed deletion — treat that as implicit force regardless of
+			// whether --yes or --force was passed.
+			useForce := force || c.wt.HasUnpushed
 			if err := git.Remove(c.wt.Path, useForce); err != nil {
 				fmt.Printf("error: %v\n", err)
 			} else {

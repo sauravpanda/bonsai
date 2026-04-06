@@ -193,3 +193,19 @@ func confirm(prompt string) bool {
 	scanner.Scan()
 	return strings.ToLower(strings.TrimSpace(scanner.Text())) == "y"
 }
+
+// confirmOrQuit reads a [y/N/q] prompt and returns (yes, quit).
+// "y" → (true, false), "q" → (false, true), anything else → (false, false).
+func confirmOrQuit(prompt string) (yes bool, quit bool) {
+	fmt.Print(prompt)
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan()
+	switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+	case "y":
+		return true, false
+	case "q":
+		return false, true
+	default:
+		return false, false
+	}
+}
