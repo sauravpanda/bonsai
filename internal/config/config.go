@@ -34,19 +34,6 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-func Save(cfg *Config) error {
-	p := Path()
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(p)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return toml.NewEncoder(f).Encode(cfg)
-}
-
 func Path() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "bonsai", "config.toml")

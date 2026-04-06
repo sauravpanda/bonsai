@@ -3,7 +3,6 @@ package github
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 )
 
@@ -36,18 +35,3 @@ func GetPR(branch string) (*PRInfo, error) {
 	return &pr, nil
 }
 
-// CreatePR opens a PR for the current branch using gh pr create --fill.
-// If web is true, opens the browser instead of printing the URL.
-func CreatePR(web bool) error {
-	args := []string{"pr", "create", "--fill"}
-	if web {
-		args = append(args, "--web")
-	}
-	cmd := exec.Command("gh", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gh pr create: %w", err)
-	}
-	return nil
-}
