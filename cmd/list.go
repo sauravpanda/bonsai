@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	runewidth "github.com/mattn/go-runewidth"
@@ -69,6 +70,10 @@ var (
 	prClosed     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))             // red
 	prNone       = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))             // dim
 	unpushedWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+
+	ageFresh = lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // green  — < 3 days
+	ageWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow — < stale threshold
+	ageStale = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))  // red    — >= stale threshold
 )
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -135,7 +140,8 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	printTable(worktrees, root)
+	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9
+	printTable(worktrees, root, staleDur)
 	return nil
 }
 
@@ -158,7 +164,7 @@ func AddedWorktrees(worktrees []*git.Worktree) []*git.Worktree {
 	return out
 }
 
-func printTable(worktrees []*git.Worktree, root string) {
+func printTable(worktrees []*git.Worktree, root string, staleDur float64) {
 	added := AddedWorktrees(worktrees)
 	numWidth := len(fmt.Sprint(len(added))) // digits needed for largest index
 
@@ -187,7 +193,7 @@ func printTable(worktrees []*git.Worktree, root string) {
 			num:    num,
 			path:   git.ShortenPath(wt.Path, root),
 			branch: branch,
-			age:    git.FormatAge(wt.Age),
+			age:    colorAge(wt.Age, staleDur, wt.IsMain),
 			commit: wt.LastCommit,
 			diff:   diff,
 			prStr:  formatPR(wt),
@@ -255,6 +261,27 @@ func padRight(s string, n int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", n-visible)
+}
+
+// colorAge renders the age string with a color that signals staleness:
+//   - main worktree or zero age: dim
+//   - < 3 days: green
+//   - < stale threshold: yellow
+//   - >= stale threshold: red
+func colorAge(age time.Duration, staleDur float64, isMain bool) string {
+	s := git.FormatAge(age)
+	if isMain || age == 0 {
+		return mainStyle.Render(s)
+	}
+	const threeDays = float64(3 * 24 * 3600e9)
+	switch {
+	case float64(age) < threeDays:
+		return ageFresh.Render(s)
+	case float64(age) < staleDur:
+		return ageWarn.Render(s)
+	default:
+		return ageStale.Render(s)
+	}
 }
 
 // hyperlink wraps text in an OSC 8 terminal hyperlink when url is non-empty.
