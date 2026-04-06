@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/sauravpanda/bonsai/internal/config"
@@ -101,6 +102,14 @@ func runPush(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Println("  opening PR ...")
 			prArgs := []string{"pr", "create", "--fill"}
+
+			// Ticket auto-linking: extract ticket IDs from the branch name and
+			// prepend them to the PR body so Linear/Jira recognise the reference.
+			if ticketRef := extractTicket(wt.Branch, cfg.TicketPattern); ticketRef != "" {
+				prArgs = append(prArgs, "--body", ticketRef+"\n\n")
+				fmt.Printf("  ticket   : %s\n", ticketRef)
+			}
+
 			if web {
 				prArgs = append(prArgs, "--web")
 			}
@@ -130,6 +139,27 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// extractTicket returns the first ticket ID found in branch using the configured
+// regexp pattern. Returns "" if pattern is empty or no match.
+func extractTicket(branch, pattern string) string {
+	if pattern == "" {
+		return ""
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return ""
+	}
+	m := re.FindStringSubmatch(branch)
+	if len(m) < 2 {
+		// No capture group match — try full match.
+		if re.MatchString(branch) {
+			return re.FindString(branch)
+		}
+		return ""
+	}
+	return m[1]
 }
 
 // resolveWorktree finds the worktree matching the given arg (path or branch),

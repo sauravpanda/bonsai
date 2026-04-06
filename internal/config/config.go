@@ -14,6 +14,10 @@ type Config struct {
 	StaleThresholdDays int    `toml:"stale_threshold_days"`
 	DefaultRemote      string `toml:"default_remote"`
 	DefaultBase        string `toml:"default_base"`
+	// TicketPattern is a Go regexp with a capturing group that extracts a
+	// ticket ID from a branch name (e.g. "([A-Z]+-\\d+)").
+	// If empty, ticket auto-linking is disabled.
+	TicketPattern string `toml:"ticket_pattern"`
 }
 
 func Default() *Config {
@@ -21,6 +25,7 @@ func Default() *Config {
 		StaleThresholdDays: 14,
 		DefaultRemote:      "origin",
 		DefaultBase:        "main",
+		TicketPattern:      `([A-Z]+-\d+)`,
 	}
 }
 

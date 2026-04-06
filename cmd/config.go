@@ -42,6 +42,7 @@ var configShowCmd = &cobra.Command{
 		fmt.Printf("stale_threshold_days = %d\n", cfg.StaleThresholdDays)
 		fmt.Printf("default_remote       = %q\n", cfg.DefaultRemote)
 		fmt.Printf("default_base         = %q\n", cfg.DefaultBase)
+		fmt.Printf("ticket_pattern       = %q\n", cfg.TicketPattern)
 		return nil
 	},
 }
