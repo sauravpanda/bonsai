@@ -94,6 +94,7 @@ func runRm(cmd *cobra.Command, args []string) error {
 
 	// Execute (or preview).
 	root, _ := git.MainRoot()
+	var hadErr bool
 	for _, wt := range targets {
 		short := git.ShortenPath(wt.Path, root)
 		if dryRun {
@@ -106,9 +107,13 @@ func runRm(cmd *cobra.Command, args []string) error {
 			wt.Branch, rmDimStyle.Render(short))
 		if err := git.Remove(wt.Path, force); err != nil {
 			fmt.Printf("%s\n", warnStyle.Render("failed: "+err.Error()))
+			hadErr = true
 		} else {
 			fmt.Println(okStyle.Render("done"))
 		}
+	}
+	if hadErr {
+		return fmt.Errorf("one or more worktrees could not be removed")
 	}
 	return nil
 }
