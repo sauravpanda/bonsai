@@ -28,6 +28,7 @@ func init() {
 	pruneCmd.Flags().BoolP("yes", "y", false, "auto-confirm all deletions (no prompts)")
 	pruneCmd.Flags().IntP("stale", "s", 0, "override stale threshold in days")
 	pruneCmd.Flags().Bool("force", false, "force removal even if worktree is dirty")
+	pruneCmd.Flags().Bool("offline", false, "skip GitHub PR status lookup (faster)")
 }
 
 var (
@@ -56,13 +57,14 @@ func runPrune(cmd *cobra.Command, args []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	autoYes, _ := cmd.Flags().GetBool("yes")
 	force, _ := cmd.Flags().GetBool("force")
+	offline, _ := cmd.Flags().GetBool("offline")
 
 	worktrees, err := git.List()
 	if err != nil {
 		return err
 	}
 
-	ghOK := github.IsAvailable()
+	ghOK := !offline && github.IsAvailable()
 	root, _ := git.MainRoot()
 	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9
 
