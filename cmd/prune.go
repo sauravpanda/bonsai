@@ -129,7 +129,10 @@ func runPrune(cmd *cobra.Command, args []string) error {
 
 		if shouldDelete {
 			fmt.Printf("  removing ... ")
-			useForce := force || (c.wt.HasUnpushed && autoYes)
+			// If the worktree has unpushed commits the user already saw the warning
+		// and confirmed deletion — treat that as implicit force regardless of
+		// whether --yes or --force was passed.
+		useForce := force || c.wt.HasUnpushed
 			if err := git.Remove(c.wt.Path, useForce); err != nil {
 				fmt.Printf("error: %v\n", err)
 			} else {
