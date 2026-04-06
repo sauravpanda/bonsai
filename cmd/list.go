@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	runewidth "github.com/mattn/go-runewidth"
 	"github.com/sauravpanda/bonsai/internal/config"
 	"github.com/sauravpanda/bonsai/internal/git"
 	"github.com/sauravpanda/bonsai/internal/github"
@@ -243,9 +244,10 @@ func fitCol(s string, n int) string {
 	return padRight(truncate(s, n), n)
 }
 
-// padRight pads s with spaces to reach visual width n, accounting for ANSI codes.
+// padRight pads s with spaces to reach visual width n, accounting for ANSI codes
+// and multi-byte Unicode characters.
 func padRight(s string, n int) string {
-	visible := len(stripANSI(s))
+	visible := runewidth.StringWidth(stripANSI(s))
 	if visible >= n {
 		return s
 	}
@@ -282,57 +284,65 @@ func formatPR(wt *git.Worktree) string {
 	}
 }
 
-// truncate shortens s so its visible (non-ANSI) length is at most n,
-// appending "…" when truncation occurs. It correctly skips ANSI escape
-// sequences so the cut always falls on a visible character boundary.
+// truncate shortens s so its visible (non-ANSI) display width is at most n,
+// appending "…" when truncation occurs. Uses runewidth for correct Unicode
+// double-width character handling.
 func truncate(s string, n int) string {
-	if len(stripANSI(s)) <= n {
+	plain := stripANSI(s)
+	if runewidth.StringWidth(plain) <= n {
 		return s
 	}
-	// Walk s counting visible chars; cut just before the nth.
-	visible := 0
+	// Walk the original string rune-by-rune, tracking display width.
+	// We need to rebuild the prefix including any ANSI escape sequences.
+	var result strings.Builder
 	inEsc := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\x1b' {
+	visWidth := 0
+	hasANSI := len(s) != len(plain)
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == '\x1b' {
 			inEsc = true
+			result.WriteRune(r)
 			continue
 		}
 		if inEsc {
-			if s[i] == 'm' {
+			result.WriteRune(r)
+			if r == 'm' {
 				inEsc = false
 			}
 			continue
 		}
-		if visible == n-1 {
-			result := s[:i] + "…"
-			// Only emit a reset when the string actually contains ANSI codes,
-			// so we don't inject literal "[0m" into plain strings.
-			if len(s) != len(stripANSI(s)) {
-				result += "\x1b[0m"
+		rw := runewidth.RuneWidth(r)
+		if visWidth+rw > n-1 {
+			result.WriteRune('…')
+			if hasANSI {
+				result.WriteString("\x1b[0m")
 			}
-			return result
+			return result.String()
 		}
-		visible++
+		result.WriteRune(r)
+		visWidth += rw
 	}
 	return s
 }
 
-// stripANSI removes ANSI escape codes for length calculation.
+// stripANSI removes ANSI escape codes, returning the plain visible string.
 func stripANSI(s string) string {
 	var out strings.Builder
 	inEsc := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\x1b' {
+	for _, r := range s {
+		if r == '\x1b' {
 			inEsc = true
 			continue
 		}
 		if inEsc {
-			if s[i] == 'm' {
+			if r == 'm' {
 				inEsc = false
 			}
 			continue
 		}
-		out.WriteByte(s[i])
+		out.WriteRune(r)
 	}
 	return out.String()
 }
