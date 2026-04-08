@@ -85,7 +85,10 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("  opening %s in %s…\n", wt.Branch, editor)
-	openCmd := exec.Command(editor, wt.Path)
+	openCmd, err := commandWithPathArg(editor, wt.Path)
+	if err != nil {
+		return err
+	}
 	openCmd.Stdout = os.Stdout
 	openCmd.Stderr = os.Stderr
 	openCmd.Stdin = os.Stdin

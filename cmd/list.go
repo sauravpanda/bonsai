@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -108,8 +109,10 @@ func runList(cmd *cobra.Command, args []string) error {
 				if err == nil {
 					wt.PRStatus = strings.ToLower(pr.State)
 					wt.PRURL = pr.URL
-				} else {
+				} else if errors.Is(err, github.ErrNoPR) {
 					wt.PRStatus = "none"
+				} else {
+					wt.PRStatus = "unknown"
 				}
 			} else if wt.IsMain {
 				wt.PRStatus = "—"

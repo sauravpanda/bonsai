@@ -96,7 +96,10 @@ func runNew(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(os.Stderr, "  note: $EDITOR not set, skipping --open")
 			return nil
 		}
-		openCmd := exec.Command(editor, wtPath)
+		openCmd, err := commandWithPathArg(editor, wtPath)
+		if err != nil {
+			return err
+		}
 		openCmd.Stdout = os.Stdout
 		openCmd.Stderr = os.Stderr
 		openCmd.Stdin = os.Stdin
