@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -88,8 +89,10 @@ func runStats(cmd *cobra.Command, args []string) error {
 				if err == nil {
 					wt.PRStatus = strings.ToLower(pr.State)
 					wt.PRURL = pr.URL
-				} else {
+				} else if errors.Is(err, github.ErrNoPR) {
 					wt.PRStatus = "none"
+				} else {
+					wt.PRStatus = "unknown"
 				}
 			}
 			return nil

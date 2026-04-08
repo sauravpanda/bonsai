@@ -48,6 +48,8 @@ var snapshotRestoreCmd = &cobra.Command{
 	RunE:  runSnapshotRestore,
 }
 
+const snapshotMetaName = ".bonsai-snapshot-path"
+
 func init() {
 	rootCmd.AddCommand(snapshotCmd)
 	snapshotCmd.AddCommand(snapshotCreateCmd)
@@ -166,10 +168,16 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("snapshot not found: %s", target)
 	}
 
-	// Determine destination from archive contents.
-	dest, err := tarGzRootDir(target)
+	info, err := inspectSnapshot(target)
 	if err != nil {
 		return fmt.Errorf("inspect archive: %w", err)
+	}
+	dest := info.OriginalPath
+	if dest == "" {
+		dest = info.RootDir
+	}
+	if dest == "" {
+		return fmt.Errorf("snapshot does not contain a restore destination")
 	}
 
 	fmt.Printf("  restoring %s to %s … ", filepath.Base(target), dest)
@@ -194,6 +202,9 @@ func createTarGz(srcDir, destFile string) error {
 	defer tw.Close()
 
 	base := filepath.Base(srcDir)
+	if err := writeSnapshotMetadata(tw, srcDir); err != nil {
+		return err
+	}
 	return filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
@@ -227,30 +238,56 @@ func createTarGz(srcDir, destFile string) error {
 	})
 }
 
-func tarGzRootDir(archivePath string) (string, error) {
+type snapshotInfo struct {
+	RootDir      string
+	OriginalPath string
+}
+
+func inspectSnapshot(archivePath string) (snapshotInfo, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
-		return "", err
+		return snapshotInfo{}, err
 	}
 	defer f.Close()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return "", err
+		return snapshotInfo{}, err
 	}
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
-	hdr, err := tr.Next()
-	if err != nil {
-		return "", err
+	var info snapshotInfo
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return snapshotInfo{}, err
+		}
+		if hdr.Name == snapshotMetaName {
+			body, err := io.ReadAll(tr)
+			if err != nil {
+				return snapshotInfo{}, err
+			}
+			info.OriginalPath = strings.TrimSpace(string(body))
+			continue
+		}
+		if info.RootDir == "" {
+			parts := strings.SplitN(hdr.Name, "/", 2)
+			info.RootDir = parts[0]
+		}
 	}
-	// Return the top-level directory in the archive.
-	parts := strings.SplitN(hdr.Name, "/", 2)
-	return parts[0], nil
+	return info, nil
 }
 
 func extractTarGz(archivePath, destDir string) error {
+	absDestDir, err := filepath.Abs(destDir)
+	if err != nil {
+		return err
+	}
+
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
@@ -273,9 +310,12 @@ func extractTarGz(archivePath, destDir string) error {
 			return err
 		}
 
-		// Sanitize path to prevent directory traversal.
-		target := filepath.Join(destDir, filepath.Clean("/"+hdr.Name))
-		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
+		target := filepath.Join(absDestDir, hdr.Name)
+		rel, err := filepath.Rel(absDestDir, target)
+		if err != nil {
+			return err
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			continue // skip suspicious paths
 		}
 
@@ -285,6 +325,9 @@ func extractTarGz(archivePath, destDir string) error {
 				return err
 			}
 		case tar.TypeReg:
+			if hdr.Name == snapshotMetaName {
+				continue
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
@@ -300,4 +343,18 @@ func extractTarGz(archivePath, destDir string) error {
 		}
 	}
 	return nil
+}
+
+func writeSnapshotMetadata(tw *tar.Writer, srcDir string) error {
+	body := []byte(srcDir + "\n")
+	hdr := &tar.Header{
+		Name: snapshotMetaName,
+		Mode: 0o600,
+		Size: int64(len(body)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	_, err := tw.Write(body)
+	return err
 }

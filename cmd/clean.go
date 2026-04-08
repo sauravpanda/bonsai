@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -70,8 +71,10 @@ func runClean(cmd *cobra.Command, args []string) error {
 				if err == nil {
 					wt.PRStatus = strings.ToLower(pr.State)
 					wt.PRURL = pr.URL
-				} else {
+				} else if errors.Is(err, github.ErrNoPR) {
 					wt.PRStatus = "none"
+				} else {
+					wt.PRStatus = "unknown"
 				}
 			}
 			return nil
@@ -189,7 +192,7 @@ func candidateReasons(wt *git.Worktree, staleDur float64) []string {
 	if wt.Age > 0 && float64(wt.Age) > staleDur {
 		reasons = append(reasons, fmt.Sprintf("stale (%s)", git.FormatAge(wt.Age)))
 	}
-	if !wt.HasUnpushed && wt.PRStatus != "open" && wt.PRStatus != "merged" {
+	if !wt.HasUnpushed && (wt.PRStatus == "" || wt.PRStatus == "none") {
 		reasons = append(reasons, "no unpushed commits")
 	}
 	return reasons

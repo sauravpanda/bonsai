@@ -81,7 +81,7 @@ func Enrich(wt *Worktree, base, remote string) {
 	}
 
 	wt.AheadBase, wt.BehindBase = aheadBehind(wt.Path, wt.Branch, base, remote)
-	wt.HasUnpushed = hasUnpushed(wt.Path, wt.Branch, remote)
+	wt.HasUnpushed = hasUnpushed(wt.Path, wt.Branch, base, remote)
 }
 
 func aheadBehind(path, branch, base, remote string) (int, int) {
@@ -102,14 +102,19 @@ func aheadBehind(path, branch, base, remote string) (int, int) {
 	return a, b
 }
 
-func hasUnpushed(path, branch, remote string) bool {
+func hasUnpushed(path, branch, base, remote string) bool {
 	remoteRef := remote + "/" + branch
 	out, err := runIn(path, "git", "rev-list", "--count", remoteRef+".."+branch)
 	if err != nil {
-		// Remote branch doesn't exist — count all local commits as unpushed.
-		out2, err2 := runIn(path, "git", "rev-list", "--count", branch)
+		// No remote branch exists yet. Count only commits unique to this branch
+		// relative to the configured base branch instead of the full history.
+		baseRef := remote + "/" + base
+		out2, err2 := runIn(path, "git", "rev-list", "--count", baseRef+".."+branch)
 		if err2 != nil {
-			return false
+			out2, err2 = runIn(path, "git", "rev-list", "--count", base+".."+branch)
+			if err2 != nil {
+				return false
+			}
 		}
 		n, _ := strconv.Atoi(strings.TrimSpace(out2))
 		return n > 0

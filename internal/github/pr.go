@@ -2,8 +2,10 @@ package github
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // PRInfo holds pull request metadata.
@@ -13,6 +15,8 @@ type PRInfo struct {
 	State  string `json:"state"` // OPEN, CLOSED, MERGED
 	URL    string `json:"url"`
 }
+
+var ErrNoPR = errors.New("no pull request for branch")
 
 // IsAvailable returns true if gh CLI is installed and authenticated.
 func IsAvailable() bool {
@@ -24,9 +28,14 @@ func GetPR(branch string) (*PRInfo, error) {
 	out, err := exec.Command(
 		"gh", "pr", "view", branch,
 		"--json", "number,title,state,url",
-	).Output()
+	).CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("no PR for branch %q", branch)
+		msg := strings.ToLower(string(out))
+		if strings.Contains(msg, "no pull requests found") ||
+			strings.Contains(msg, "could not find pull request") {
+			return nil, fmt.Errorf("%w: %q", ErrNoPR, branch)
+		}
+		return nil, fmt.Errorf("gh pr view %q: %w", branch, err)
 	}
 	var pr PRInfo
 	if err := json.Unmarshal(out, &pr); err != nil {
@@ -34,4 +43,3 @@ func GetPR(branch string) (*PRInfo, error) {
 	}
 	return &pr, nil
 }
-
