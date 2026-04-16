@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/sauravpanda/bonsai/internal/config"
 	"github.com/sauravpanda/bonsai/internal/git"
 	"github.com/sauravpanda/bonsai/internal/tui"
@@ -28,12 +27,6 @@ var statusCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(statusCmd)
 }
-
-var (
-	statusClean   = lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // green
-	statusDirty   = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow
-	statusStagedS = lipgloss.NewStyle().Foreground(lipgloss.Color("12")) // blue
-)
 
 type wtStatus struct {
 	wt        *git.Worktree
@@ -104,20 +97,17 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 	spin.Stop()
 
-	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9
+	staleDur := staleDuration(cfg.StaleThresholdDays)
 
-	hdr := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-
-	fmt.Println(hdr.Render(fmt.Sprintf("  %-28s  %-6s  %-14s  %-8s  %s", "BRANCH", "AGE", "STAGED/DIRTY/UNTRACKED", "+/-", "LAST COMMIT")))
-	fmt.Println(dim.Render("  " + strings.Repeat("─", 90)))
+	fmt.Println(headerStyle.Render(fmt.Sprintf("  %-28s  %-6s  %-14s  %-8s  %s", "BRANCH", "AGE", "STAGED/DIRTY/UNTRACKED", "+/-", "LAST COMMIT")))
+	fmt.Println(dimStyle.Render("  " + strings.Repeat("─", 90)))
 
 	for _, s := range statuses {
 		wt := s.wt
 
 		branch := wt.Branch
 		if wt.IsMain {
-			branch = dim.Render(branch)
+			branch = dimStyle.Render(branch)
 		}
 
 		age := colorAge(wt.Age, staleDur, wt.IsMain)
@@ -125,25 +115,25 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 		var stateStr string
 		if wt.IsMain {
-			stateStr = dim.Render("—")
+			stateStr = dimStyle.Render("—")
 		} else {
 			stagedPart := fmt.Sprintf("%d staged", s.staged)
 			dirtyPart := fmt.Sprintf("%d dirty", s.dirty)
 			untrackedPart := fmt.Sprintf("%d untracked", s.untracked)
 			if s.staged > 0 {
-				stagedPart = statusStagedS.Render(stagedPart)
+				stagedPart = infoStyle.Render(stagedPart)
 			} else {
-				stagedPart = dim.Render(stagedPart)
+				stagedPart = dimStyle.Render(stagedPart)
 			}
 			if s.dirty > 0 {
-				dirtyPart = statusDirty.Render(dirtyPart)
+				dirtyPart = warnStyle.Render(dirtyPart)
 			} else {
-				dirtyPart = statusClean.Render(dirtyPart)
+				dirtyPart = okStyle.Render(dirtyPart)
 			}
 			if s.untracked > 0 {
-				untrackedPart = statusDirty.Render(untrackedPart)
+				untrackedPart = warnStyle.Render(untrackedPart)
 			} else {
-				untrackedPart = dim.Render(untrackedPart)
+				untrackedPart = dimStyle.Render(untrackedPart)
 			}
 			stateStr = stagedPart + "  " + dirtyPart + "  " + untrackedPart
 		}
@@ -157,12 +147,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			commit,
 		)
 		if wt.IsMain {
-			fmt.Println(dim.Render(row))
+			fmt.Println(dimStyle.Render(row))
 		} else {
 			fmt.Println(row)
 		}
 	}
 
-	fmt.Println(dim.Render("  " + strings.Repeat("─", 90)))
+	fmt.Println(dimStyle.Render("  " + strings.Repeat("─", 90)))
 	return nil
 }

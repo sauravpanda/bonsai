@@ -83,7 +83,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	g.Wait() //nolint:errcheck — goroutines always return nil
 	spin.Stop()
 
-	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9 // nanoseconds
+	staleDur := staleDuration(cfg.StaleThresholdDays)
 
 	var items []tui.Item
 	for _, wt := range worktrees {
@@ -182,6 +182,14 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	return nil
 }
+
+// nsPerDay is the number of nanoseconds in a day, used to convert
+// StaleThresholdDays (user-facing config) to a time.Duration-compatible value.
+const nsPerDay = float64(24 * 3600 * 1e9)
+
+// staleDuration converts a day count into the ns-scale float the worktree
+// age comparison expects.
+func staleDuration(days int) float64 { return float64(days) * nsPerDay }
 
 // candidateReasons returns the reasons a worktree is a deletion candidate.
 func candidateReasons(wt *git.Worktree, staleDur float64) []string {

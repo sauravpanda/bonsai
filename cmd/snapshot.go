@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/sauravpanda/bonsai/internal/git"
 	"github.com/spf13/cobra"
 )
@@ -69,12 +68,6 @@ func snapshotDir() (string, error) {
 	return dir, nil
 }
 
-var (
-	snapBold = lipgloss.NewStyle().Bold(true)
-	snapDim  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	snapOK   = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-)
-
 func runSnapshotCreate(cmd *cobra.Command, args []string) error {
 	worktrees, err := git.List()
 	if err != nil {
@@ -102,7 +95,7 @@ func runSnapshotCreate(cmd *cobra.Command, args []string) error {
 	archiveName := fmt.Sprintf("%s-%s.tar.gz", branch, ts)
 	archivePath := filepath.Join(dir, archiveName)
 
-	fmt.Printf("  creating snapshot of %s … ", snapBold.Render(wt.Branch))
+	fmt.Printf("  creating snapshot of %s … ", boldStyle.Render(wt.Branch))
 
 	if err := createTarGz(wt.Path, archivePath); err != nil {
 		fmt.Println("failed")
@@ -114,7 +107,7 @@ func runSnapshotCreate(cmd *cobra.Command, args []string) error {
 	if info != nil {
 		size = " (" + formatBytes(info.Size()) + ")"
 	}
-	fmt.Printf("%s\n", snapOK.Render("done"))
+	fmt.Printf("%s\n", okStyle.Render("done"))
 	fmt.Printf("  saved to: %s%s\n", archivePath, size)
 	return nil
 }
@@ -138,7 +131,7 @@ func runSnapshotList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(snapshots) == 0 {
-		fmt.Println(snapDim.Render("  no snapshots found"))
+		fmt.Println(dimStyle.Render("  no snapshots found"))
 		return nil
 	}
 
@@ -147,7 +140,7 @@ func runSnapshotList(cmd *cobra.Command, args []string) error {
 		info, _ := e.Info()
 		size := ""
 		if info != nil {
-			size = " " + snapDim.Render("("+formatBytes(info.Size())+")")
+			size = " " + dimStyle.Render("("+formatBytes(info.Size())+")")
 		}
 		fmt.Printf("  %s%s\n", e.Name(), size)
 	}
@@ -185,7 +178,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string) error {
 		fmt.Println("failed")
 		return fmt.Errorf("extract archive: %w", err)
 	}
-	fmt.Println(snapOK.Render("done"))
+	fmt.Println(okStyle.Render("done"))
 	return nil
 }
 

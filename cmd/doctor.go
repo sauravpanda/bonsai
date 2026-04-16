@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/sauravpanda/bonsai/internal/git"
 	"github.com/spf13/cobra"
 )
@@ -36,13 +35,6 @@ type doctorIssue struct {
 	detail   string
 	fix      string
 }
-
-var (
-	issueError = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	issueWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	issueFix   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	issueOK    = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-)
 
 func runDoctor(cmd *cobra.Command, args []string) error {
 	worktrees, err := git.List()
@@ -127,7 +119,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(issues) == 0 {
-		fmt.Printf("%s  All %d worktree(s) are healthy.\n", issueOK.Render("✓"), checked)
+		fmt.Printf("%s  All %d worktree(s) are healthy.\n", okStyle.Render("✓"), checked)
 		return nil
 	}
 
@@ -135,13 +127,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	for _, iss := range issues {
 		var sev string
 		if iss.severity == "error" {
-			sev = issueError.Render("✗ error")
+			sev = errBoldStyle.Render("✗ error")
 		} else {
-			sev = issueWarn.Render("⚠ warn")
+			sev = warnStyle.Render("⚠ warn")
 		}
 		fmt.Printf("  %s  %s\n", sev, iss.label)
 		fmt.Printf("         %s\n", iss.detail)
-		fmt.Printf("         %s %s\n\n", issueFix.Render("fix:"), iss.fix)
+		fmt.Printf("         %s %s\n\n", dimStyle.Render("fix:"), iss.fix)
 	}
 	return fmt.Errorf("%d issue(s) found", len(issues))
 }

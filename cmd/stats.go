@@ -101,7 +101,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 	g.Wait() //nolint:errcheck
 	spin.Stop()
 
-	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9
+	staleDur := staleDuration(cfg.StaleThresholdDays)
 
 	var (
 		staleCount    int
@@ -139,21 +139,15 @@ func runStats(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	bold := lipgloss.NewStyle().Bold(true)
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	green := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	yellow := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	red := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-
-	sep := dim.Render("  " + strings.Repeat("─", 40))
+	sep := dimStyle.Render("  " + strings.Repeat("─", 40))
 	fmt.Println(sep)
-	fmt.Printf("  %s  %s\n", bold.Render("Total worktrees:"), fmt.Sprint(len(added)))
-	fmt.Printf("  %s  %s\n", bold.Render("Stale (≥ threshold): "), staleStyle(staleCount, red))
-	fmt.Printf("  %s  %s\n", bold.Render("Open PRs:            "), staleStyle(openPRCount, green))
-	fmt.Printf("  %s  %s\n", bold.Render("Unpushed commits:    "), staleStyle(unpushedCount, yellow))
-	fmt.Printf("  %s  %s\n", bold.Render("Total disk usage:    "), formatBytes(diskTotal))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Total worktrees:"), fmt.Sprint(len(added)))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Stale (≥ threshold): "), staleStyle(staleCount, errStyle))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Open PRs:            "), staleStyle(openPRCount, okStyle))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Unpushed commits:    "), staleStyle(unpushedCount, warnStyle))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Total disk usage:    "), formatBytes(diskTotal))
 	fmt.Println(sep)
-	fmt.Println("  " + bold.Render("Age distribution:"))
+	fmt.Println("  " + boldStyle.Render("Age distribution:"))
 	fmt.Printf("    < 1 day   : %d\n", bucket1d)
 	fmt.Printf("    1-7 days  : %d\n", bucket7d)
 	fmt.Printf("    7-30 days : %d\n", bucket30d)
@@ -164,7 +158,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 
 func staleStyle(n int, nonZeroStyle lipgloss.Style) string {
 	if n == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("0")
+		return dimStyle.Render("0")
 	}
 	return nonZeroStyle.Render(fmt.Sprint(n))
 }

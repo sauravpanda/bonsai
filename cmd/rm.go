@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/sauravpanda/bonsai/internal/config"
 	"github.com/sauravpanda/bonsai/internal/git"
 	"github.com/spf13/cobra"
@@ -30,8 +29,6 @@ func init() {
 	rmCmd.Flags().Bool("force", false, "remove even if branch has unpushed commits")
 	rmCmd.Flags().Bool("dry-run", false, "show what would be removed without doing it")
 }
-
-var rmDimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 func runRm(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
@@ -85,8 +82,8 @@ func runRm(cmd *cobra.Command, args []string) error {
 			warnStyle.Render("⚠"))
 		for _, wt := range blocked {
 			fmt.Fprintf(os.Stderr, "  • %s  %s\n",
-				lipgloss.NewStyle().Bold(true).Render(wt.Branch),
-				rmDimStyle.Render(wt.Path))
+				boldStyle.Render(wt.Branch),
+				dimStyle.Render(wt.Path))
 		}
 		fmt.Fprintln(os.Stderr, "\nUse --force to remove them anyway.")
 		return fmt.Errorf("aborted")
@@ -99,12 +96,12 @@ func runRm(cmd *cobra.Command, args []string) error {
 		short := git.ShortenPath(wt.Path, root)
 		if dryRun {
 			fmt.Printf("  [dry-run] remove  %s  %s\n",
-				lipgloss.NewStyle().Bold(true).Render(wt.Branch),
-				rmDimStyle.Render(short))
+				boldStyle.Render(wt.Branch),
+				dimStyle.Render(short))
 			continue
 		}
 		fmt.Printf("  removing  %-28s  %s … ",
-			wt.Branch, rmDimStyle.Render(short))
+			wt.Branch, dimStyle.Render(short))
 		if err := git.Remove(wt.Path, force); err != nil {
 			fmt.Printf("%s\n", warnStyle.Render("failed: "+err.Error()))
 			hadErr = true
