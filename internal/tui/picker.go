@@ -54,7 +54,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.items)-1 {
 				m.cursor++
 			}
-		case " ":
+		case " ", "x":
 			m.items[m.cursor].Selected = !m.items[m.cursor].Selected
 		case "a":
 			for i := range m.items {
@@ -75,8 +75,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 var (
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	helpKeyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
+	focusBarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	focusedStyle  = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("15")).Bold(true)
+	focusedDescStyle = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("252"))
+	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	checkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
 	normalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
 	descStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
@@ -90,7 +94,11 @@ func (m Model) View() string {
 
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(m.title) + "\n")
-	b.WriteString(helpStyle.Render("↑/↓  navigate  ·  space  toggle  ·  a  all  ·  n  none  ·  enter  confirm  ·  q  quit") + "\n\n")
+	hk := func(k string) string { return helpKeyStyle.Render(k) }
+	b.WriteString(helpStyle.Render(fmt.Sprintf(
+		"%s select/unselect  ·  %s move  ·  %s all  ·  %s none  ·  %s confirm  ·  %s quit",
+		hk("space"), hk("↑/↓"), hk("a"), hk("n"), hk("enter"), hk("q"),
+	)) + "\n\n")
 
 	if len(m.items) == 0 {
 		b.WriteString(dimStyle.Render("  No candidates found.\n"))
@@ -98,28 +106,38 @@ func (m Model) View() string {
 	}
 
 	for i, item := range m.items {
-		arrow := "  "
-		if i == m.cursor {
-			arrow = cursorStyle.Render("▶ ")
-		}
+		focused := i == m.cursor
 
-		var box, label string
+		var box string
 		if item.Selected {
-			box = selectedStyle.Render("◉")
-			label = selectedStyle.Render(item.Label)
+			box = checkStyle.Render("[✓]")
 		} else {
-			box = normalStyle.Render("○")
-			label = normalStyle.Render(item.Label)
+			box = normalStyle.Render("[ ]")
 		}
 
 		warn := ""
 		if item.Selected && item.HasUnpushed {
-			warn = " " + warnStyle.Render("⚠  unpushed commits")
+			warn = "  " + warnStyle.Render("⚠ unpushed commits")
 		}
 
-		fmt.Fprintf(&b, "%s%s %s%s\n", arrow, box, label, warn)
+		bar := "  "
+		rowStyle := normalStyle
+		if focused {
+			bar = focusBarStyle.Render("▌ ")
+			rowStyle = focusedStyle
+		} else if item.Selected {
+			rowStyle = selectedStyle
+		}
+
+		label := rowStyle.Render(item.Label)
+		fmt.Fprintf(&b, "%s%s %s%s\n", bar, box, label, warn)
+
 		if item.Desc != "" {
-			fmt.Fprintf(&b, "     %s\n", descStyle.Render(item.Desc))
+			ds := descStyle
+			if focused {
+				ds = focusedDescStyle
+			}
+			fmt.Fprintf(&b, "       %s\n", ds.Render(item.Desc))
 		}
 	}
 
