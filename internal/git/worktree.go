@@ -2,6 +2,7 @@ package git
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -179,6 +180,12 @@ func MainRoot() (string, error) {
 
 func run(name string, args ...string) (string, error) {
 	out, err := exec.Command(name, args...).Output()
+	// Fold git's stderr into the error so callers surface the actual reason
+	// (e.g. "contains modified or untracked files") instead of "exit status 128".
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+		err = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
+	}
 	return string(out), err
 }
 

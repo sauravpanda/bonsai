@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/sauravpanda/bonsai/internal/config"
 	"github.com/sauravpanda/bonsai/internal/git"
 	"github.com/spf13/cobra"
@@ -34,12 +33,6 @@ func init() {
 	syncCmd.Flags().Bool("merge", false, "use git merge instead of git rebase")
 	syncCmd.Flags().Bool("dry-run", false, "show what would be synced without running")
 }
-
-var (
-	syncOK      = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	syncSkipped = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	syncFailed  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-)
 
 func runSync(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
@@ -101,7 +94,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		if dryRun {
 			fmt.Printf("  %-28s  %s\n",
 				truncate(branch, 28),
-				syncSkipped.Render(fmt.Sprintf("[dry-run] would %s from %s", verb, baseRef)),
+				dimStyle.Render(fmt.Sprintf("[dry-run] would %s from %s", verb, baseRef)),
 			)
 			continue
 		}
@@ -119,7 +112,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		outStr := strings.TrimSpace(string(out))
 
 		if err != nil {
-			fmt.Println(syncFailed.Render("failed"))
+			fmt.Println(errStyle.Render("failed"))
 			if outStr != "" {
 				for _, line := range strings.Split(outStr, "\n") {
 					fmt.Printf("    %s\n", line)
@@ -133,16 +126,16 @@ func runSync(cmd *cobra.Command, args []string) error {
 			}
 			failed++
 		} else {
-			fmt.Println(syncOK.Render("ok"))
+			fmt.Println(okStyle.Render("ok"))
 			synced++
 		}
 	}
 
 	if !dryRun {
 		fmt.Printf("\n%s synced, %s skipped, %s failed\n",
-			syncOK.Render(fmt.Sprint(synced)),
-			syncSkipped.Render(fmt.Sprint(skipped)),
-			syncFailed.Render(fmt.Sprint(failed)),
+			okStyle.Render(fmt.Sprint(synced)),
+			dimStyle.Render(fmt.Sprint(skipped)),
+			errStyle.Render(fmt.Sprint(failed)),
 		)
 		if failed > 0 {
 			return fmt.Errorf("%d worktree(s) failed to sync", failed)

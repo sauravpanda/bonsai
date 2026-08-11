@@ -1,13 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	runewidth "github.com/mattn/go-runewidth"
 	"github.com/sauravpanda/bonsai/internal/config"
 	"github.com/sauravpanda/bonsai/internal/git"
@@ -22,7 +22,10 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all git worktrees",
 	Long: `Display a table of all git worktrees with path, branch, age,
-last commit message, ahead/behind the base branch, and PR status.`,
+last commit message, ahead/behind the base branch, and PR status.
+
+Pass --json to emit structured output for scripting; in that mode progress
+messages are suppressed and JSON is written to stdout.`,
 	RunE: runList,
 }
 
@@ -30,6 +33,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().Bool("no-pr", false, "filter: show only worktrees with no PR")
 	listCmd.Flags().Bool("offline", false, "skip GitHub PR status lookup (faster)")
+	listCmd.Flags().Bool("json", false, "emit worktree data as JSON to stdout (no progress output)")
 }
 
 // Fixed column widths.
@@ -63,20 +67,6 @@ func computeCols(diffWidth, numWidth int) cols {
 	return cols{path, branch, commit, diffWidth}
 }
 
-var (
-	headerStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	mainStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	prMerged     = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true) // green
-	prOpen       = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))            // yellow
-	prClosed     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))             // red
-	prNone       = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))             // dim
-	unpushedWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-
-	ageFresh = lipgloss.NewStyle().Foreground(lipgloss.Color("10")) // green  — < 3 days
-	ageWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // yellow — < stale threshold
-	ageStale = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))  // red    — >= stale threshold
-)
-
 func runList(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -90,15 +80,19 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	filterNoPR, _ := cmd.Flags().GetBool("no-pr")
 	offline, _ := cmd.Flags().GetBool("offline")
+	asJSON, _ := cmd.Flags().GetBool("json")
 	ghOK := !offline && github.IsAvailable()
 
-	if !ghOK && !offline {
+	if !ghOK && !offline && !asJSON {
 		fmt.Fprintln(os.Stderr, "  note: gh CLI not authenticated — PR status unavailable")
 	}
 
 	root, _ := git.MainRoot()
 
-	spin := tui.Start(fmt.Sprintf("enriching %d worktree(s) in parallel…", len(worktrees)))
+	var spin *tui.Spinner
+	if !asJSON {
+		spin = tui.Start(fmt.Sprintf("enriching %d worktree(s) in parallel…", len(worktrees)))
+	}
 	var g errgroup.Group
 	for _, wt := range worktrees {
 		wt := wt
@@ -125,7 +119,9 @@ func runList(cmd *cobra.Command, args []string) error {
 		})
 	}
 	g.Wait() //nolint:errcheck — goroutines always return nil
-	spin.Stop()
+	if spin != nil {
+		spin.Stop()
+	}
 
 	// Apply --no-pr filter: keep main worktree + added worktrees with no PR.
 	if filterNoPR {
@@ -138,14 +134,72 @@ func runList(cmd *cobra.Command, args []string) error {
 		worktrees = filtered
 	}
 
+	if asJSON {
+		return emitJSON(worktrees, root)
+	}
+
 	if len(worktrees) == 0 || (len(worktrees) == 1 && worktrees[0].IsMain) {
 		fmt.Println(mainStyle.Render("  no worktrees match the filter"))
 		return nil
 	}
 
-	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9
+	staleDur := staleDuration(cfg.StaleThresholdDays)
 	printTable(worktrees, root, staleDur)
 	return nil
+}
+
+// jsonWorktree is the JSON shape emitted by `bonsai list --json`.
+type jsonWorktree struct {
+	Number      int    `json:"number,omitempty"`
+	Path        string `json:"path"`
+	ShortPath   string `json:"short_path"`
+	Branch      string `json:"branch"`
+	HEAD        string `json:"head,omitempty"`
+	IsMain      bool   `json:"is_main"`
+	IsDetached  bool   `json:"is_detached,omitempty"`
+	AgeSeconds  int64  `json:"age_seconds"`
+	AgeHuman    string `json:"age_human"`
+	LastCommit  string `json:"last_commit,omitempty"`
+	AheadBase   int    `json:"ahead_base"`
+	BehindBase  int    `json:"behind_base"`
+	PRStatus    string `json:"pr_status,omitempty"`
+	PRURL       string `json:"pr_url,omitempty"`
+	HasUnpushed bool   `json:"has_unpushed"`
+}
+
+func emitJSON(worktrees []*git.Worktree, root string) error {
+	out := make([]jsonWorktree, 0, len(worktrees))
+	addedIdx := 0
+	for _, wt := range worktrees {
+		j := jsonWorktree{
+			Path:        wt.Path,
+			ShortPath:   git.ShortenPath(wt.Path, root),
+			Branch:      wt.Branch,
+			HEAD:        wt.HEAD,
+			IsMain:      wt.IsMain,
+			IsDetached:  wt.IsDetached,
+			AgeSeconds:  int64(wt.Age / time.Second),
+			AgeHuman:    git.FormatAge(wt.Age),
+			LastCommit:  wt.LastCommit,
+			AheadBase:   wt.AheadBase,
+			BehindBase:  wt.BehindBase,
+			PRStatus:    wt.PRStatus,
+			PRURL:       wt.PRURL,
+			HasUnpushed: wt.HasUnpushed,
+		}
+		// The em-dash placeholder used by the table renderer is noise in JSON.
+		if j.PRStatus == "—" {
+			j.PRStatus = ""
+		}
+		if !wt.IsMain {
+			addedIdx++
+			j.Number = addedIdx
+		}
+		out = append(out, j)
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 // tableRow holds pre-computed, display-ready cell values for one worktree.
@@ -221,7 +275,7 @@ func printTable(worktrees []*git.Worktree, root string, staleDur float64) {
 	fmt.Println("  " + headerStyle.Render(header))
 	fmt.Println(mainStyle.Render("  " + sep))
 
-	numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	numStyle := infoStyle.Bold(true)
 	for _, r := range rows {
 		numCell := fitCol(r.num, numWidth)
 		if !r.isMain && r.num != "" {
@@ -276,7 +330,7 @@ func colorAge(age time.Duration, staleDur float64, isMain bool) string {
 	if isMain || age == 0 {
 		return mainStyle.Render(s)
 	}
-	const threeDays = float64(3 * 24 * 3600e9)
+	threeDays := staleDuration(3)
 	switch {
 	case float64(age) < threeDays:
 		return ageFresh.Render(s)
@@ -355,6 +409,25 @@ func truncate(s string, n int) string {
 			return result.String()
 		}
 		result.WriteRune(r)
+		visWidth += rw
+	}
+	return s
+}
+
+// truncateLeft shortens s so its display width is at most n, dropping the
+// head and prepending "…". Use for paths, where the tail is the part that
+// distinguishes entries. Expects plain (non-ANSI) input.
+func truncateLeft(s string, n int) string {
+	if runewidth.StringWidth(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	visWidth := 0
+	for i := len(runes) - 1; i >= 0; i-- {
+		rw := runewidth.RuneWidth(runes[i])
+		if visWidth+rw > n-1 {
+			return "…" + string(runes[i+1:])
+		}
 		visWidth += rw
 	}
 	return s

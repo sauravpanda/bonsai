@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/sauravpanda/bonsai/internal/config"
 	"github.com/sauravpanda/bonsai/internal/git"
 	"github.com/sauravpanda/bonsai/internal/github"
@@ -32,13 +31,6 @@ func init() {
 	pruneCmd.Flags().Bool("force", false, "force removal even if worktree is dirty")
 	pruneCmd.Flags().Bool("offline", false, "skip GitHub PR status lookup (faster)")
 }
-
-var (
-	reasonStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	boldStyle   = lipgloss.NewStyle().Bold(true)
-)
 
 type pruneCandidate struct {
 	wt      *git.Worktree
@@ -68,7 +60,7 @@ func runPrune(cmd *cobra.Command, args []string) error {
 
 	ghOK := !offline && github.IsAvailable()
 	root, _ := git.MainRoot()
-	staleDur := float64(cfg.StaleThresholdDays) * 24 * 3600e9
+	staleDur := staleDuration(cfg.StaleThresholdDays)
 
 	// Collect non-main worktrees and enrich them in parallel.
 	var added []*git.Worktree
