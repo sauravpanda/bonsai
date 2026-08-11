@@ -37,6 +37,58 @@ func TestCommandWithPathArgSupportsQuotedArgs(t *testing.T) {
 	}
 }
 
+func TestCandidateReasonsFreshWorktreeIsNotACandidate(t *testing.T) {
+	// A clean worktree with no PR and recent activity must not be offered
+	// for deletion — "no unpushed commits" is not a reason on its own.
+	reasons := candidateReasons(&git.Worktree{
+		Age:         time.Hour,
+		PRStatus:    "none",
+		HasUnpushed: false,
+	}, float64(14*24*time.Hour))
+
+	if len(reasons) != 0 {
+		t.Fatalf("expected no reasons for a fresh clean worktree, got %v", reasons)
+	}
+}
+
+func TestCandidateReasonsStaleCleanWorktree(t *testing.T) {
+	reasons := candidateReasons(&git.Worktree{
+		Age:         30 * 24 * time.Hour,
+		PRStatus:    "none",
+		HasUnpushed: false,
+	}, float64(14*24*time.Hour))
+
+	if len(reasons) != 2 || reasons[0] != "stale (1mo)" || reasons[1] != "no unpushed commits" {
+		t.Fatalf("unexpected reasons: %v", reasons)
+	}
+}
+
+func TestCandidateReasonsMergedPRIsACandidate(t *testing.T) {
+	reasons := candidateReasons(&git.Worktree{
+		Age:         time.Hour,
+		PRStatus:    "merged",
+		HasUnpushed: false,
+	}, float64(14*24*time.Hour))
+
+	if len(reasons) != 1 || reasons[0] != "merged PR" {
+		t.Fatalf("unexpected reasons: %v", reasons)
+	}
+}
+
+func TestTruncateLeftKeepsTail(t *testing.T) {
+	got := truncateLeft("/very/long/path/to/worktrees/feature-x", 20)
+	if got != "…worktrees/feature-x" {
+		t.Fatalf("truncateLeft = %q", got)
+	}
+	if short := truncateLeft("wt/feature", 20); short != "wt/feature" {
+		t.Fatalf("short string modified: %q", short)
+	}
+	// Double-width runes must count as 2 columns.
+	if wide := truncateLeft("ここ/日本語/パス", 6); wide != "…/パス" {
+		t.Fatalf("wide truncation = %q", wide)
+	}
+}
+
 func TestCandidateReasonsDoesNotTreatUnknownPRAsNoPR(t *testing.T) {
 	reasons := candidateReasons(&git.Worktree{
 		Age:         time.Hour,

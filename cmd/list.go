@@ -414,6 +414,25 @@ func truncate(s string, n int) string {
 	return s
 }
 
+// truncateLeft shortens s so its display width is at most n, dropping the
+// head and prepending "…". Use for paths, where the tail is the part that
+// distinguishes entries. Expects plain (non-ANSI) input.
+func truncateLeft(s string, n int) string {
+	if runewidth.StringWidth(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	visWidth := 0
+	for i := len(runes) - 1; i >= 0; i-- {
+		rw := runewidth.RuneWidth(runes[i])
+		if visWidth+rw > n-1 {
+			return "…" + string(runes[i+1:])
+		}
+		visWidth += rw
+	}
+	return s
+}
+
 // stripANSI removes ANSI escape codes, returning the plain visible string.
 func stripANSI(s string) string {
 	var out strings.Builder

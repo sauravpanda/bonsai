@@ -21,12 +21,12 @@ var cleanCmd = &cobra.Command{
 	Long: `Launch an interactive TUI to select and delete worktrees.
 
 Candidates are worktrees with:
-  - A merged GitHub PR
+  - A merged GitHub PR, or
   - No activity for longer than the stale threshold (default 14 days)
-  - No unpushed commits
 
-Worktrees with unpushed commits can still be selected but require
-explicit confirmation.`,
+Candidates with no unpushed commits are marked as such; candidates with
+unpushed commits can still be selected but require explicit confirmation.
+Use --all to list every worktree regardless of candidacy.`,
 	RunE: runClean,
 }
 
@@ -60,13 +60,20 @@ func runClean(cmd *cobra.Command, args []string) error {
 	ghOK := !offline && github.IsAvailable()
 	root, _ := git.MainRoot()
 
-	spin := tui.Start(fmt.Sprintf("enriching %d worktree(s) in parallel…", len(worktrees)))
-	var g errgroup.Group
+	var added []*git.Worktree
 	for _, wt := range worktrees {
+		if !wt.IsMain {
+			added = append(added, wt)
+		}
+	}
+
+	spin := tui.Start(fmt.Sprintf("enriching %d worktree(s) in parallel…", len(added)))
+	var g errgroup.Group
+	for _, wt := range added {
 		wt := wt
 		g.Go(func() error {
 			git.Enrich(wt, cfg.DefaultBase, cfg.DefaultRemote)
-			if ghOK && !wt.IsMain && !wt.IsDetached && wt.Branch != "" {
+			if ghOK && !wt.IsDetached && wt.Branch != "" {
 				pr, err := github.GetPR(wt.Branch)
 				if err == nil {
 					wt.PRStatus = strings.ToLower(pr.State)
@@ -86,18 +93,14 @@ func runClean(cmd *cobra.Command, args []string) error {
 	staleDur := staleDuration(cfg.StaleThresholdDays)
 
 	var items []tui.Item
-	for _, wt := range worktrees {
-		if wt.IsMain {
-			continue
-		}
-
+	for _, wt := range added {
 		reasons := candidateReasons(wt, staleDur)
 		if !showAll && len(reasons) == 0 {
 			continue
 		}
 
 		path := git.ShortenPath(wt.Path, root)
-		label := fmt.Sprintf("%-28s  %s", truncate(wt.Branch, 28), truncate(path, 40))
+		label := fmt.Sprintf("%-28s  %s", truncate(wt.Branch, 28), truncateLeft(path, 40))
 
 		desc := ""
 		if len(reasons) > 0 {
@@ -165,7 +168,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// Execute deletions
 	ok, failed := 0, 0
 	for _, it := range toDelete {
-		fmt.Printf("  removing %s ... ", it.ID)
+		fmt.Printf("  removing %s ... ", git.ShortenPath(it.ID, root))
 		if err := git.Remove(it.ID, force || it.HasUnpushed); err != nil {
 			fmt.Printf("error: %v\n", err)
 			failed++
@@ -200,7 +203,10 @@ func candidateReasons(wt *git.Worktree, staleDur float64) []string {
 	if wt.Age > 0 && float64(wt.Age) > staleDur {
 		reasons = append(reasons, fmt.Sprintf("stale (%s)", git.FormatAge(wt.Age)))
 	}
-	if !wt.HasUnpushed && (wt.PRStatus == "" || wt.PRStatus == "none") {
+	// "no unpushed commits" is a safety note on an existing reason, never a
+	// reason on its own — otherwise every fresh worktree without a PR would
+	// be offered for deletion (and prune --yes would delete it).
+	if len(reasons) > 0 && !wt.HasUnpushed && (wt.PRStatus == "" || wt.PRStatus == "none") {
 		reasons = append(reasons, "no unpushed commits")
 	}
 	return reasons

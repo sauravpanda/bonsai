@@ -10,11 +10,11 @@ import (
 
 // Item represents a worktree entry in the picker.
 type Item struct {
-	ID           string // worktree path (unique key)
-	Label        string // branch name or short path
-	Desc         string // reason line: "merged PR · 21d · no unpushed"
-	Selected     bool
-	HasUnpushed  bool
+	ID          string // worktree path (unique key)
+	Label       string // branch name or short path
+	Desc        string // reason line: "merged PR · 21d · no unpushed"
+	Selected    bool
+	HasUnpushed bool
 }
 
 // Result is returned after the picker exits.
@@ -25,11 +25,11 @@ type Result struct {
 
 // Model is the bubbletea model for the interactive picker.
 type Model struct {
-	title   string
-	items   []Item
-	cursor  int
-	done    bool
-	quit    bool
+	title  string
+	items  []Item
+	cursor int
+	done   bool
+	quit   bool
 }
 
 // NewPicker creates a new picker model.
@@ -73,18 +73,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	helpKeyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
-	focusBarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	focusedStyle  = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("15")).Bold(true)
+	titleStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
+	helpStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	helpKeyStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
+	focusBarStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	focusedStyle     = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("15")).Bold(true)
 	focusedDescStyle = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("252"))
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	checkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	normalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-	descStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	selectedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	checkStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	normalStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+	descStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	warnStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	dimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
 
 func (m Model) View() string {
