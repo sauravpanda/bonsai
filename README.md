@@ -130,7 +130,9 @@ bonsai clean --stale 7
 bonsai clean --force
 ```
 
-Keys: `up/down` move, `space` toggle, `a` select all, `n` select none, `enter` confirm, `q` quit
+Picker keys: `up/down` or `j/k` move, `space` toggles the highlighted row,
+`a` selects all safe rows, `n` clears the selection, and `enter` opens a final
+review screen. Confirm deletion there with `y` or return with `n`/`esc`.
 
 ### `bonsai prune`
 
