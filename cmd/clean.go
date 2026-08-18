@@ -108,7 +108,11 @@ func runClean(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	result, err := tui.Run("bonsai clean — select worktrees to delete", pickerItems)
+	result, err := tui.RunWithOptions(
+		"bonsai clean — select worktrees to delete",
+		pickerItems,
+		tui.PickerOptions{AllowProtected: force},
+	)
 	if err != nil {
 		return err
 	}
