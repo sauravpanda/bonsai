@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/sauravpanda/bonsai/internal/config"
@@ -35,34 +34,6 @@ type wtStatus struct {
 	untracked int
 }
 
-func parseStatus(path string) (dirty, staged, untracked int) {
-	out, err := exec.Command("git", "-C", path, "status", "--porcelain").Output()
-	if err != nil {
-		return
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if len(line) < 2 {
-			continue
-		}
-		x := line[0] // index status
-		y := line[1] // worktree status
-		switch {
-		case line[:2] == "??":
-			untracked++
-		case x != ' ' && x != '?':
-			staged++
-			if y != ' ' && y != '?' {
-				dirty++
-			}
-		default:
-			if y != ' ' && y != '?' {
-				dirty++
-			}
-		}
-	}
-	return
-}
-
 func runStatus(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -85,10 +56,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		i, wt := i, wt
 		g.Go(func() error {
 			git.Enrich(wt, cfg.DefaultBase, cfg.DefaultRemote)
-			d, s, u := parseStatus(wt.Path)
-			statuses[i].dirty = d
-			statuses[i].staged = s
-			statuses[i].untracked = u
+			statuses[i].dirty = wt.DirtyFiles
+			statuses[i].staged = wt.StagedFiles
+			statuses[i].untracked = wt.UntrackedFiles
 			return nil
 		})
 	}

@@ -4,6 +4,10 @@
 
 If AI coding tools keep spawning branches and worktrees all over a repo, bonsai helps keep things tidy. It shows what exists, what is stale, what has a PR, what still has unpushed work, and what is safe to clean up.
 
+For Claude Code, Bonsai also ships a `/bonsai:cleanup` skill. Claude creates a
+short-lived cleanup plan, explains what will be preserved, asks for approval,
+and applies only the worktrees Bonsai has proven safe.
+
 ## Why bonsai?
 
 `git worktree` is powerful, but the day-to-day experience is still pretty manual:
@@ -31,8 +35,23 @@ make install
 
 Requirements:
 
-- Go 1.21+
+- Go 1.25+
 - Optional: [GitHub CLI](https://cli.github.com/) for PR status and PR creation
+
+### Add the Claude Code skill
+
+After installing the `bonsai` binary, run these commands inside Claude Code:
+
+```text
+/plugin marketplace add sauravpanda/bonsai
+/plugin install bonsai@bonsai-tools
+```
+
+Then ask Claude to clean up naturally, or invoke the skill directly:
+
+```text
+/bonsai:cleanup
+```
 
 ## Quick Start
 
@@ -98,10 +117,15 @@ bonsai push --pr --remove
 ### `bonsai clean`
 
 Open an interactive picker for merged, stale, or otherwise removable worktrees.
+Commands are repository-local by default. Add `--global` to discover Git
+repositories under common development roots and manage their linked worktrees
+in one view.
 
 ```bash
 bonsai clean
 bonsai clean --all
+bonsai clean --global --all
+bonsai clean --global --claude
 bonsai clean --stale 7
 bonsai clean --force
 ```
@@ -110,13 +134,27 @@ Keys: `up/down` move, `space` toggle, `a` select all, `n` select none, `enter` c
 
 ### `bonsai prune`
 
-Review deletion candidates one by one in a non-TUI flow.
+Classify merged or inactive worktrees as safe, review, or protected. Automatic
+cleanup only removes safe worktrees and their local branches.
 
 ```bash
 bonsai prune
 bonsai prune --dry-run
-bonsai prune -y
+bonsai prune --claude
+bonsai prune --global --claude --dry-run
+bonsai prune --global --claude --json
+bonsai prune --global --root ~/workspace --dry-run
+bonsai prune --apply <plan-id> --yes
+bonsai prune -y              # safe worktrees only
 ```
+
+`--json` saves a plan for 15 minutes. Applying the plan rechecks every local
+fingerprint first and aborts before deletion if any worktree changed.
+
+Global scans are bounded to existing common development directories:
+`~/Github`, `~/GitHub`, `~/Projects`, `~/Developer`, `~/Code`, and `~/src`.
+Use repeatable `--root` flags to choose other locations. Repository-local
+`.bonsai.toml` settings are honored independently during a global scan.
 
 ### `bonsai rm <n> [n...]`
 
@@ -143,7 +181,11 @@ bonsai doctor      # detect broken or orphaned worktrees
 
 ## Safety Defaults
 
-- Never deletes worktrees with unpushed commits unless `--force` is used
+- Classifies candidates as `safe`, `review`, or `protected`
+- Protects staged, modified, untracked, unpushed, locked, current, and open-PR worktrees
+- Never lets `--yes` or plan/apply delete review or protected worktrees
+- Revalidates saved plans before making any changes
+- Deletes local branches only for worktrees proven recoverable; never deletes remote branches
 - Supports `--dry-run` on destructive flows
 - Gracefully works without GitHub auth
 - Uses the `gh` CLI instead of managing GitHub tokens directly
@@ -175,7 +217,7 @@ Setup:
 gh auth login
 ```
 
-Without `gh`, bonsai still works. GitHub-specific fields just fall back to unknown status.
+Without `gh`, bonsai still works and falls back to local Git safety checks.
 
 ## License
 

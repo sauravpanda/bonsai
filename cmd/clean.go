@@ -2,17 +2,14 @@ package cmd
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/sauravpanda/bonsai/internal/config"
 	"github.com/sauravpanda/bonsai/internal/git"
-	"github.com/sauravpanda/bonsai/internal/github"
 	"github.com/sauravpanda/bonsai/internal/tui"
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
 )
 
 var cleanCmd = &cobra.Command{
@@ -20,22 +17,24 @@ var cleanCmd = &cobra.Command{
 	Short: "Interactively delete merged/stale worktrees",
 	Long: `Launch an interactive TUI to select and delete worktrees.
 
-Candidates are worktrees with:
-  - A merged GitHub PR, or
-  - No activity for longer than the stale threshold (default 14 days)
+Candidates are worktrees with a merged GitHub PR or no activity beyond the
+stale threshold. Every candidate uses the same safe, review, and protected
+classification as bonsai prune. Protected worktrees require explicit --force.
 
-Candidates with no unpushed commits are marked as such; candidates with
-unpushed commits can still be selected but require explicit confirmation.
-Use --all to list every worktree regardless of candidacy.`,
+Use --global to discover repositories across bounded development roots, and
+--all to include recent worktrees that are not cleanup candidates.`,
 	RunE: runClean,
 }
 
 func init() {
 	rootCmd.AddCommand(cleanCmd)
 	cleanCmd.Flags().IntP("stale", "s", 0, "override stale threshold in days")
-	cleanCmd.Flags().Bool("force", false, "force removal even if worktree is dirty")
-	cleanCmd.Flags().Bool("all", false, "show all worktrees, not just candidates")
-	cleanCmd.Flags().Bool("offline", false, "skip GitHub PR status lookup (faster)")
+	cleanCmd.Flags().Bool("force", false, "allow selection of review/protected worktrees")
+	cleanCmd.Flags().Bool("all", false, "show all worktrees, not just cleanup candidates")
+	cleanCmd.Flags().Bool("offline", false, "skip GitHub PR status lookup")
+	cleanCmd.Flags().Bool("claude", false, "only inspect worktrees under .claude/worktrees")
+	cleanCmd.Flags().Bool("global", false, "discover and inspect worktrees across development roots")
+	cleanCmd.Flags().StringSlice("root", nil, "global scan root (repeatable; defaults to common development directories)")
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
@@ -43,146 +42,139 @@ func runClean(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-
-	if cmd.Flags().Changed("stale") {
+	hasStaleOverride := cmd.Flags().Changed("stale")
+	if hasStaleOverride {
 		staleOverride, _ := cmd.Flags().GetInt("stale")
 		cfg.StaleThresholdDays = staleOverride
 	}
 	force, _ := cmd.Flags().GetBool("force")
 	showAll, _ := cmd.Flags().GetBool("all")
 	offline, _ := cmd.Flags().GetBool("offline")
+	claudeOnly, _ := cmd.Flags().GetBool("claude")
+	global, _ := cmd.Flags().GetBool("global")
+	scanRoots, _ := cmd.Flags().GetStringSlice("root")
+	if len(scanRoots) > 0 && !global {
+		return fmt.Errorf("--root requires --global")
+	}
 
-	worktrees, err := git.List()
+	plan, err := buildCleanupPlan(cfg, cleanupPlanOptions{
+		ClaudeOnly:       claudeOnly,
+		Offline:          offline,
+		Progress:         true,
+		Global:           global,
+		ScanRoots:        scanRoots,
+		IncludeAll:       showAll,
+		StaleOverride:    cfg.StaleThresholdDays,
+		HasStaleOverride: hasStaleOverride,
+	})
 	if err != nil {
 		return err
 	}
-
-	ghOK := !offline && github.IsAvailable()
-	root, _ := git.MainRoot()
-
-	var added []*git.Worktree
-	for _, wt := range worktrees {
-		if !wt.IsMain {
-			added = append(added, wt)
-		}
+	for _, warning := range plan.Warnings {
+		fmt.Printf("  %s %s\n", warnStyle.Render("⚠"), warning)
 	}
-
-	spin := tui.Start(fmt.Sprintf("enriching %d worktree(s) in parallel…", len(added)))
-	var g errgroup.Group
-	for _, wt := range added {
-		wt := wt
-		g.Go(func() error {
-			git.Enrich(wt, cfg.DefaultBase, cfg.DefaultRemote)
-			if ghOK && !wt.IsDetached && wt.Branch != "" {
-				pr, err := github.GetPR(wt.Branch)
-				if err == nil {
-					wt.PRStatus = strings.ToLower(pr.State)
-					wt.PRURL = pr.URL
-				} else if errors.Is(err, github.ErrNoPR) {
-					wt.PRStatus = "none"
-				} else {
-					wt.PRStatus = "unknown"
-				}
-			}
-			return nil
-		})
-	}
-	g.Wait() //nolint:errcheck — goroutines always return nil
-	spin.Stop()
-
-	staleDur := staleDuration(cfg.StaleThresholdDays)
-
-	var items []tui.Item
-	for _, wt := range added {
-		reasons := candidateReasons(wt, staleDur)
-		if !showAll && len(reasons) == 0 {
-			continue
-		}
-
-		path := git.ShortenPath(wt.Path, root)
-		label := fmt.Sprintf("%-28s  %s", truncate(wt.Branch, 28), truncateLeft(path, 40))
-
-		desc := ""
-		if len(reasons) > 0 {
-			desc = strings.Join(reasons, " · ")
+	if plan.Summary.Scanned == 0 {
+		if global {
+			fmt.Printf("No added worktrees found across %d discovered repositories.\n", plan.Summary.Repositories)
 		} else {
-			desc = "no specific reason (--all flag)"
+			fmt.Println("No added worktrees found in this repository. Use --global to scan your development roots.")
 		}
-		if wt.HasUnpushed {
-			desc += " · ⚠ unpushed"
-		}
-
-		items = append(items, tui.Item{
-			ID:          wt.Path,
-			Label:       label,
-			Desc:        desc,
-			HasUnpushed: wt.HasUnpushed,
-		})
-	}
-
-	if len(items) == 0 {
-		fmt.Println("No worktree candidates found. Use --all to show all worktrees.")
 		return nil
 	}
 
-	result, err := tui.Run("bonsai clean — select worktrees to delete", items)
+	itemsByPath := make(map[string]cleanupItem)
+	var pickerItems []tui.Item
+	addItems := func(items []cleanupItem) {
+		for _, item := range items {
+			label := fmt.Sprintf("%-36s  %s",
+				truncate(item.RepositoryName+"/"+item.Branch, 36),
+				truncateLeft(item.ShortPath, 40),
+			)
+			pickerItems = append(pickerItems, tui.Item{
+				ID:        item.Path,
+				Label:     label,
+				Desc:      string(item.State) + " · " + strings.Join(item.Reasons, " · "),
+				Protected: item.State != cleanupSafe,
+			})
+			itemsByPath[item.Path] = item
+		}
+	}
+	addItems(plan.Safe)
+	addItems(plan.Review)
+	addItems(plan.Protected)
+
+	if len(pickerItems) == 0 {
+		fmt.Printf("No merged or inactive candidates found across %d added worktree(s). Use --all to review them.\n", plan.Summary.Scanned)
+		return nil
+	}
+
+	result, err := tui.Run("bonsai clean — select worktrees to delete", pickerItems)
 	if err != nil {
 		return err
 	}
-
 	if !result.Confirmed {
 		fmt.Println("Aborted.")
 		return nil
 	}
 
-	var toDelete []tui.Item
-	for _, it := range result.Items {
-		if it.Selected {
-			toDelete = append(toDelete, it)
+	var selected []tui.Item
+	for _, item := range result.Items {
+		if item.Selected {
+			selected = append(selected, item)
 		}
 	}
-
-	if len(toDelete) == 0 {
+	if len(selected) == 0 {
 		fmt.Println("Nothing selected.")
 		return nil
 	}
 
-	// Warn about unpushed commits
-	var withUnpushed []tui.Item
-	for _, it := range toDelete {
-		if it.HasUnpushed {
-			withUnpushed = append(withUnpushed, it)
+	var protected []tui.Item
+	for _, item := range selected {
+		if item.Protected {
+			protected = append(protected, item)
 		}
 	}
-	if len(withUnpushed) > 0 {
-		fmt.Printf("\n%s The following worktrees have unpushed commits:\n", warnStyle.Render("⚠"))
-		for _, it := range withUnpushed {
-			fmt.Printf("  • %s\n", it.Label)
+	if len(protected) > 0 && !force {
+		fmt.Printf("\n%s The following worktrees are review/protected:\n", warnStyle.Render("⚠"))
+		for _, item := range protected {
+			fmt.Printf("  • %s\n", item.Label)
 		}
-		if !confirm("\nDelete anyway? [y/N] ") {
-			fmt.Println("Aborted.")
-			return nil
-		}
+		return fmt.Errorf("review/protected worktrees require the explicit --force flag")
 	}
 
-	// Execute deletions
-	ok, failed := 0, 0
-	for _, it := range toDelete {
-		fmt.Printf("  removing %s ... ", git.ShortenPath(it.ID, root))
-		if err := git.Remove(it.ID, force || it.HasUnpushed); err != nil {
+	cleanupResult := cleanupApplyResult{}
+	failed := 0
+	for _, selectedItem := range selected {
+		planned := itemsByPath[selectedItem.ID]
+		fmt.Printf("  removing %s/%s ... ", planned.RepositoryName, planned.Branch)
+		if planned.State == cleanupSafe {
+			if err := validateCleanupItem(planned); err != nil {
+				fmt.Printf("skipped: %v\n", err)
+				failed++
+				continue
+			}
+		}
+		if err := git.RemoveAt(planned.RepositoryRoot, planned.Path, planned.State != cleanupSafe); err != nil {
 			fmt.Printf("error: %v\n", err)
 			failed++
-		} else {
-			fmt.Println("done")
-			ok++
+			continue
+		}
+		fmt.Println(okStyle.Render("done"))
+		cleanupResult.Removed++
+		cleanupResult.ReclaimedBytes += planned.DiskBytes
+		if planned.DeleteBranch {
+			if err := git.DeleteBranchAt(planned.RepositoryRoot, planned.Branch, true); err != nil {
+				cleanupResult.BranchDeleteFail = append(cleanupResult.BranchDeleteFail, planned.RepositoryName+"/"+planned.Branch+": "+err.Error())
+			} else {
+				cleanupResult.BranchesDeleted++
+			}
 		}
 	}
 
-	fmt.Printf("\n%d removed", ok)
+	printApplyResult(cleanupResult)
 	if failed > 0 {
-		fmt.Printf(", %d failed (try --force)", failed)
+		fmt.Printf("  %d failed\n", failed)
 	}
-	fmt.Println()
 	return nil
 }
 
@@ -193,31 +185,6 @@ const nsPerDay = float64(24 * 3600 * 1e9)
 // staleDuration converts a day count into the ns-scale float the worktree
 // age comparison expects.
 func staleDuration(days int) float64 { return float64(days) * nsPerDay }
-
-// candidateReasons returns the reasons a worktree is a deletion candidate.
-func candidateReasons(wt *git.Worktree, staleDur float64) []string {
-	var reasons []string
-	if wt.PRStatus == "merged" {
-		reasons = append(reasons, "merged PR")
-	}
-	if wt.Age > 0 && float64(wt.Age) > staleDur {
-		reasons = append(reasons, fmt.Sprintf("stale (%s)", git.FormatAge(wt.Age)))
-	}
-	// "no unpushed commits" is a safety note on an existing reason, never a
-	// reason on its own — otherwise every fresh worktree without a PR would
-	// be offered for deletion (and prune --yes would delete it).
-	if len(reasons) > 0 && !wt.HasUnpushed && (wt.PRStatus == "" || wt.PRStatus == "none") {
-		reasons = append(reasons, "no unpushed commits")
-	}
-	return reasons
-}
-
-func confirm(prompt string) bool {
-	fmt.Print(prompt)
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	return strings.ToLower(strings.TrimSpace(scanner.Text())) == "y"
-}
 
 // confirmOrQuit reads a [y/N/q] prompt and returns (yes, quit).
 // "y" → (true, false), "q" → (false, true), anything else → (false, false).

@@ -103,6 +103,8 @@ func runList(cmd *cobra.Command, args []string) error {
 				if err == nil {
 					wt.PRStatus = strings.ToLower(pr.State)
 					wt.PRURL = pr.URL
+					wt.PRNumber = pr.Number
+					wt.PRHeadOID = pr.HeadRefOID
 				} else if errors.Is(err, github.ErrNoPR) {
 					wt.PRStatus = "none"
 				} else {
@@ -121,6 +123,11 @@ func runList(cmd *cobra.Command, args []string) error {
 	g.Wait() //nolint:errcheck — goroutines always return nil
 	if spin != nil {
 		spin.Stop()
+	}
+	activeDirs, activeKnown := activeWorkingDirectories()
+	for _, wt := range worktrees {
+		wt.InUseKnown = activeKnown
+		wt.IsInUse = pathContainsAny(wt.Path, activeDirs)
 	}
 
 	// Apply --no-pr filter: keep main worktree + added worktrees with no PR.
@@ -150,21 +157,36 @@ func runList(cmd *cobra.Command, args []string) error {
 
 // jsonWorktree is the JSON shape emitted by `bonsai list --json`.
 type jsonWorktree struct {
-	Number      int    `json:"number,omitempty"`
-	Path        string `json:"path"`
-	ShortPath   string `json:"short_path"`
-	Branch      string `json:"branch"`
-	HEAD        string `json:"head,omitempty"`
-	IsMain      bool   `json:"is_main"`
-	IsDetached  bool   `json:"is_detached,omitempty"`
-	AgeSeconds  int64  `json:"age_seconds"`
-	AgeHuman    string `json:"age_human"`
-	LastCommit  string `json:"last_commit,omitempty"`
-	AheadBase   int    `json:"ahead_base"`
-	BehindBase  int    `json:"behind_base"`
-	PRStatus    string `json:"pr_status,omitempty"`
-	PRURL       string `json:"pr_url,omitempty"`
-	HasUnpushed bool   `json:"has_unpushed"`
+	Number             int    `json:"number,omitempty"`
+	Path               string `json:"path"`
+	ShortPath          string `json:"short_path"`
+	Branch             string `json:"branch"`
+	HEAD               string `json:"head,omitempty"`
+	IsMain             bool   `json:"is_main"`
+	IsDetached         bool   `json:"is_detached,omitempty"`
+	IsLocked           bool   `json:"is_locked,omitempty"`
+	LockReason         string `json:"lock_reason,omitempty"`
+	IsInUse            bool   `json:"is_in_use,omitempty"`
+	InUseKnown         bool   `json:"in_use_known"`
+	AgeSeconds         int64  `json:"age_seconds"`
+	AgeHuman           string `json:"age_human"`
+	CreatedAt          string `json:"created_at,omitempty"`
+	ActivityAt         string `json:"activity_at,omitempty"`
+	LastCommit         string `json:"last_commit,omitempty"`
+	AheadBase          int    `json:"ahead_base"`
+	BehindBase         int    `json:"behind_base"`
+	PRStatus           string `json:"pr_status,omitempty"`
+	PRNumber           int    `json:"pr_number,omitempty"`
+	PRURL              string `json:"pr_url,omitempty"`
+	HasUnpushed        bool   `json:"has_unpushed"`
+	UnpushedCommits    int    `json:"unpushed_commits"`
+	UnpushedKnown      bool   `json:"unpushed_known"`
+	RemoteBranchExists bool   `json:"remote_branch_exists"`
+	MergedIntoBase     bool   `json:"merged_into_base"`
+	DirtyFiles         int    `json:"dirty_files"`
+	StagedFiles        int    `json:"staged_files"`
+	UntrackedFiles     int    `json:"untracked_files"`
+	StatusKnown        bool   `json:"status_known"`
 }
 
 func emitJSON(worktrees []*git.Worktree, root string) error {
@@ -172,20 +194,39 @@ func emitJSON(worktrees []*git.Worktree, root string) error {
 	addedIdx := 0
 	for _, wt := range worktrees {
 		j := jsonWorktree{
-			Path:        wt.Path,
-			ShortPath:   git.ShortenPath(wt.Path, root),
-			Branch:      wt.Branch,
-			HEAD:        wt.HEAD,
-			IsMain:      wt.IsMain,
-			IsDetached:  wt.IsDetached,
-			AgeSeconds:  int64(wt.Age / time.Second),
-			AgeHuman:    git.FormatAge(wt.Age),
-			LastCommit:  wt.LastCommit,
-			AheadBase:   wt.AheadBase,
-			BehindBase:  wt.BehindBase,
-			PRStatus:    wt.PRStatus,
-			PRURL:       wt.PRURL,
-			HasUnpushed: wt.HasUnpushed,
+			Path:               wt.Path,
+			ShortPath:          git.ShortenPath(wt.Path, root),
+			Branch:             wt.Branch,
+			HEAD:               wt.HEAD,
+			IsMain:             wt.IsMain,
+			IsDetached:         wt.IsDetached,
+			IsLocked:           wt.IsLocked,
+			LockReason:         wt.LockReason,
+			IsInUse:            wt.IsInUse,
+			InUseKnown:         wt.InUseKnown,
+			AgeSeconds:         int64(wt.Age / time.Second),
+			AgeHuman:           git.FormatAge(wt.Age),
+			LastCommit:         wt.LastCommit,
+			AheadBase:          wt.AheadBase,
+			BehindBase:         wt.BehindBase,
+			PRStatus:           wt.PRStatus,
+			PRNumber:           wt.PRNumber,
+			PRURL:              wt.PRURL,
+			HasUnpushed:        wt.HasUnpushed,
+			UnpushedCommits:    wt.UnpushedCommits,
+			UnpushedKnown:      wt.UnpushedKnown,
+			RemoteBranchExists: wt.RemoteBranchExists,
+			MergedIntoBase:     wt.MergedIntoBase,
+			DirtyFiles:         wt.DirtyFiles,
+			StagedFiles:        wt.StagedFiles,
+			UntrackedFiles:     wt.UntrackedFiles,
+			StatusKnown:        wt.StatusKnown,
+		}
+		if !wt.CreatedAt.IsZero() {
+			j.CreatedAt = wt.CreatedAt.UTC().Format(time.RFC3339)
+		}
+		if !wt.ActivityAt.IsZero() {
+			j.ActivityAt = wt.ActivityAt.UTC().Format(time.RFC3339)
 		}
 		// The em-dash placeholder used by the table renderer is noise in JSON.
 		if j.PRStatus == "—" {

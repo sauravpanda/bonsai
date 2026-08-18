@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "bonsai",
+  "displayName": "Bonsai",
+  "version": "0.2.0",
+  "description": "Safely analyze and clean up Claude Code git worktrees",
+  "author": {
+    "name": "Saurav Panda",
+    "url": "https://github.com/sauravpanda"
+  },
+  "homepage": "https://github.com/sauravpanda/bonsai",
+  "repository": "https://github.com/sauravpanda/bonsai",
+  "license": "MIT",
+  "keywords": ["git", "worktrees", "cleanup", "claude-code"]
+}

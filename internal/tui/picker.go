@@ -15,6 +15,7 @@ type Item struct {
 	Desc        string // reason line: "merged PR · 21d · no unpushed"
 	Selected    bool
 	HasUnpushed bool
+	Protected   bool
 }
 
 // Result is returned after the picker exits.
@@ -116,7 +117,9 @@ func (m Model) View() string {
 		}
 
 		warn := ""
-		if item.Selected && item.HasUnpushed {
+		if item.Protected {
+			warn = "  " + warnStyle.Render("⚠ protected")
+		} else if item.Selected && item.HasUnpushed {
 			warn = "  " + warnStyle.Render("⚠ unpushed commits")
 		}
 

@@ -34,6 +34,12 @@ func Default() *Config {
 //  2. Global config (~/.config/bonsai/config.toml)
 //  3. Per-repo config (.bonsai.toml in git repo root) — wins on any key it specifies
 func Load() (*Config, error) {
+	return LoadForRepo(gitRepoRoot())
+}
+
+// LoadForRepo returns the effective configuration for a specific repository.
+// An empty repoRoot applies only built-in and global configuration.
+func LoadForRepo(repoRoot string) (*Config, error) {
 	cfg := Default()
 
 	// 1. Apply global config.
@@ -44,7 +50,7 @@ func Load() (*Config, error) {
 	}
 
 	// 2. Apply per-repo config (.bonsai.toml at git root), if any.
-	if repoRoot := gitRepoRoot(); repoRoot != "" {
+	if repoRoot != "" {
 		repoPath := filepath.Join(repoRoot, ".bonsai.toml")
 		if fileExists(repoPath) {
 			if _, err := toml.DecodeFile(repoPath, cfg); err != nil {

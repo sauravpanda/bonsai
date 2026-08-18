@@ -37,41 +37,50 @@ func TestCommandWithPathArgSupportsQuotedArgs(t *testing.T) {
 	}
 }
 
-func TestCandidateReasonsFreshWorktreeIsNotACandidate(t *testing.T) {
-	// A clean worktree with no PR and recent activity must not be offered
-	// for deletion — "no unpushed commits" is not a reason on its own.
-	reasons := candidateReasons(&git.Worktree{
-		Age:         time.Hour,
-		PRStatus:    "none",
-		HasUnpushed: false,
-	}, float64(14*24*time.Hour))
+func TestClassifyCleanupFreshWorktreeIsNotACandidate(t *testing.T) {
+	state, reasons, candidate := classifyCleanup(&git.Worktree{
+		Age:                time.Hour,
+		PRStatus:           "none",
+		StatusKnown:        true,
+		UnpushedKnown:      true,
+		RemoteBranchExists: true,
+	}, "/repo", 14*24*time.Hour)
 
-	if len(reasons) != 0 {
-		t.Fatalf("expected no reasons for a fresh clean worktree, got %v", reasons)
+	if candidate || state != "" || len(reasons) != 0 {
+		t.Fatalf("expected no candidate, got state=%q reasons=%v", state, reasons)
 	}
 }
 
-func TestCandidateReasonsStaleCleanWorktree(t *testing.T) {
-	reasons := candidateReasons(&git.Worktree{
-		Age:         30 * 24 * time.Hour,
-		PRStatus:    "none",
-		HasUnpushed: false,
-	}, float64(14*24*time.Hour))
+func TestClassifyCleanupStaleRemoteBackedWorktreeIsSafe(t *testing.T) {
+	state, reasons, candidate := classifyCleanup(&git.Worktree{
+		Path:               "/repo/.claude/worktrees/old",
+		Branch:             "worktree-old",
+		Age:                30 * 24 * time.Hour,
+		PRStatus:           "none",
+		StatusKnown:        true,
+		UnpushedKnown:      true,
+		RemoteBranchExists: true,
+	}, "/repo", 14*24*time.Hour)
 
-	if len(reasons) != 2 || reasons[0] != "stale (1mo)" || reasons[1] != "no unpushed commits" {
-		t.Fatalf("unexpected reasons: %v", reasons)
+	if !candidate || state != cleanupSafe {
+		t.Fatalf("expected safe candidate, got state=%q reasons=%v", state, reasons)
 	}
 }
 
-func TestCandidateReasonsMergedPRIsACandidate(t *testing.T) {
-	reasons := candidateReasons(&git.Worktree{
-		Age:         time.Hour,
-		PRStatus:    "merged",
-		HasUnpushed: false,
-	}, float64(14*24*time.Hour))
+func TestClassifyCleanupMergedPRHeadIsSafeAfterSquash(t *testing.T) {
+	state, reasons, candidate := classifyCleanup(&git.Worktree{
+		Path:            "/repo/.claude/worktrees/merged",
+		Branch:          "worktree-merged",
+		HEAD:            "abc123",
+		PRStatus:        "merged",
+		PRHeadOID:       "abc123",
+		StatusKnown:     true,
+		UnpushedKnown:   true,
+		UnpushedCommits: 2,
+	}, "/repo", 14*24*time.Hour)
 
-	if len(reasons) != 1 || reasons[0] != "merged PR" {
-		t.Fatalf("unexpected reasons: %v", reasons)
+	if !candidate || state != cleanupSafe {
+		t.Fatalf("expected merged PR head to be safe, got state=%q reasons=%v", state, reasons)
 	}
 }
 
@@ -89,17 +98,68 @@ func TestTruncateLeftKeepsTail(t *testing.T) {
 	}
 }
 
-func TestCandidateReasonsDoesNotTreatUnknownPRAsNoPR(t *testing.T) {
-	reasons := candidateReasons(&git.Worktree{
-		Age:         time.Hour,
-		PRStatus:    "unknown",
-		HasUnpushed: false,
-	}, float64(14*24*time.Hour))
+func TestClassifyCleanupProtectsUnknownPRState(t *testing.T) {
+	state, reasons, candidate := classifyCleanup(&git.Worktree{
+		Path:               "/repo/.claude/worktrees/unknown",
+		Branch:             "worktree-unknown",
+		Age:                30 * 24 * time.Hour,
+		PRStatus:           "unknown",
+		StatusKnown:        true,
+		UnpushedKnown:      true,
+		RemoteBranchExists: true,
+	}, "/repo", 14*24*time.Hour)
 
-	for _, reason := range reasons {
-		if reason == "no unpushed commits" {
-			t.Fatalf("unexpected reason set: %v", reasons)
-		}
+	if !candidate || state != cleanupProtected {
+		t.Fatalf("expected protected candidate, got state=%q reasons=%v", state, reasons)
+	}
+}
+
+func TestClassifyCleanupProtectsWorkingChanges(t *testing.T) {
+	state, _, candidate := classifyCleanup(&git.Worktree{
+		Path:               "/repo/.claude/worktrees/dirty",
+		Branch:             "worktree-dirty",
+		Age:                30 * 24 * time.Hour,
+		StatusKnown:        true,
+		DirtyFiles:         1,
+		UntrackedFiles:     2,
+		UnpushedKnown:      true,
+		RemoteBranchExists: true,
+	}, "/repo", 14*24*time.Hour)
+
+	if !candidate || state != cleanupProtected {
+		t.Fatalf("expected dirty worktree to be protected, got %q", state)
+	}
+}
+
+func TestClassifyCleanupProtectsCurrentWorktree(t *testing.T) {
+	path := "/repo/.claude/worktrees/current"
+	state, _, candidate := classifyCleanup(&git.Worktree{
+		Path:               path,
+		Branch:             "worktree-current",
+		Age:                30 * 24 * time.Hour,
+		StatusKnown:        true,
+		UnpushedKnown:      true,
+		RemoteBranchExists: true,
+	}, path, 14*24*time.Hour)
+
+	if !candidate || state != cleanupProtected {
+		t.Fatalf("expected current worktree to be protected, got %q", state)
+	}
+}
+
+func TestClassifyCleanupProtectsWorktreeInUse(t *testing.T) {
+	state, _, candidate := classifyCleanup(&git.Worktree{
+		Path:               "/repo/.claude/worktrees/active",
+		Branch:             "worktree-active",
+		Age:                30 * 24 * time.Hour,
+		IsInUse:            true,
+		StatusKnown:        true,
+		UnpushedKnown:      true,
+		RemoteBranchExists: true,
+	}, "/repo", 14*24*time.Hour)
+
+	if !candidate || state != cleanupProtected {
+		t.Fatalf("expected in-use worktree to be protected, got %q", state)
 	}
 }
 
