@@ -54,9 +54,9 @@ func runRm(cmd *cobra.Command, args []string) error {
 	var targets []*git.Worktree
 	seen := map[int]bool{}
 	for _, a := range args {
-		n, err := strconv.Atoi(strings.TrimSpace(a))
-		if err != nil || n < 1 || n > len(added) {
-			return fmt.Errorf("invalid worktree number %q (valid range: 1–%d)", a, len(added))
+		n, err := parseWorktreeNumber(a, len(added))
+		if err != nil {
+			return err
 		}
 		if seen[n] {
 			continue
@@ -113,4 +113,12 @@ func runRm(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("one or more worktrees could not be removed")
 	}
 	return nil
+}
+
+func parseWorktreeNumber(value string, total int) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < 1 || n > total {
+		return 0, fmt.Errorf("invalid worktree number %q (valid range: 1-%d)", value, total)
+	}
+	return n, nil
 }

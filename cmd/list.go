@@ -105,6 +105,7 @@ func runList(cmd *cobra.Command, args []string) error {
 					wt.PRURL = pr.URL
 					wt.PRNumber = pr.Number
 					wt.PRHeadOID = pr.HeadRefOID
+					reconcileMergedPRStatus(wt)
 				} else if errors.Is(err, github.ErrNoPR) {
 					wt.PRStatus = "none"
 				} else {
@@ -134,7 +135,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	if filterNoPR {
 		var filtered []*git.Worktree
 		for _, wt := range worktrees {
-			if wt.IsMain || wt.PRStatus == "none" || wt.PRStatus == "unknown" {
+			if matchesNoPRFilter(wt) {
 				filtered = append(filtered, wt)
 			}
 		}
@@ -153,6 +154,21 @@ func runList(cmd *cobra.Command, args []string) error {
 	staleDur := staleDuration(cfg.StaleThresholdDays)
 	printTable(worktrees, root, staleDur)
 	return nil
+}
+
+func matchesNoPRFilter(wt *git.Worktree) bool {
+	return wt.IsMain || wt.PRStatus == "none"
+}
+
+func reconcileMergedPRStatus(wt *git.Worktree) {
+	// Squash and rebase merges do not make the original branch commits
+	// ancestors of the base branch. If GitHub confirms that this exact HEAD was
+	// the merged PR head, it is not unpushed work and should not get a warning.
+	if wt.PRStatus == "merged" && wt.PRHeadOID != "" && wt.HEAD == wt.PRHeadOID {
+		wt.HasUnpushed = false
+		wt.UnpushedCommits = 0
+		wt.UnpushedKnown = true
+	}
 }
 
 // jsonWorktree is the JSON shape emitted by `bonsai list --json`.
