@@ -23,7 +23,8 @@ If a path or branch name is provided, bonsai will find the matching
 worktree. If omitted, the current working directory is used.
 
 After pushing, you can optionally open a GitHub PR via gh CLI,
-and then remove the worktree.`,
+and then remove the worktree. Removal requires confirmation unless --yes is
+provided together with --remove.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPush,
 }
@@ -33,6 +34,7 @@ func init() {
 	pushCmd.Flags().Bool("pr", false, "open a PR after pushing")
 	pushCmd.Flags().Bool("web", false, "open PR creation in browser (implies --pr)")
 	pushCmd.Flags().BoolP("remove", "r", false, "remove worktree after push/PR")
+	pushCmd.Flags().BoolP("yes", "y", false, "confirm worktree removal without prompting (requires --remove)")
 	pushCmd.Flags().Bool("dry-run", false, "show what would happen without doing it")
 }
 
@@ -45,7 +47,11 @@ func runPush(cmd *cobra.Command, args []string) error {
 	openPR, _ := cmd.Flags().GetBool("pr")
 	web, _ := cmd.Flags().GetBool("web")
 	remove, _ := cmd.Flags().GetBool("remove")
+	autoYes, _ := cmd.Flags().GetBool("yes")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	if autoYes && !remove {
+		return fmt.Errorf("--yes requires --remove")
+	}
 	if web {
 		openPR = true
 	}
@@ -126,6 +132,17 @@ func runPush(cmd *cobra.Command, args []string) error {
 
 	// Remove
 	if remove {
+		approved, quit := approvePushRemoval(autoYes, func() (bool, bool) {
+			return confirmOrQuit(fmt.Sprintf("  Remove worktree %s? [y/N/q] ", wt.Path))
+		})
+		if !approved {
+			if quit {
+				fmt.Println("  removal cancelled; worktree kept")
+			} else {
+				fmt.Println("  worktree kept")
+			}
+			return nil
+		}
 		if wt.HasUnpushed {
 			// After push, re-check — but we just pushed, so should be clear.
 			// Re-enrich to be safe.
@@ -139,6 +156,13 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func approvePushRemoval(autoYes bool, prompt func() (yes bool, quit bool)) (yes bool, quit bool) {
+	if autoYes {
+		return true, false
+	}
+	return prompt()
 }
 
 // extractTicket returns the first ticket ID found in branch using the configured

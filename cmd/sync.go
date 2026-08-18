@@ -122,11 +122,10 @@ func runSync(cmd *cobra.Command, args []string) error {
 					fmt.Printf("    %s\n", line)
 				}
 			}
-			// Abort rebase on conflict so the worktree is not left in a broken state.
-			if !useMerge {
-				exec.Command("git", "-C", wt.Path, "rebase", "--abort").Run() //nolint:errcheck
-			} else {
-				exec.Command("git", "-C", wt.Path, "merge", "--abort").Run() //nolint:errcheck
+			// Abort on conflict so the worktree is not left in a broken state.
+			if abortErr := abortFailedSync(wt.Path, useMerge); abortErr != nil {
+				fmt.Fprintf(os.Stderr, "    %s\n",
+					warnStyle.Render("warning: could not abort cleanly: "+abortErr.Error()))
 			}
 			failed++
 		} else {
@@ -147,4 +146,20 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func abortFailedSync(path string, useMerge bool) error {
+	operation := "rebase"
+	if useMerge {
+		operation = "merge"
+	}
+	out, err := exec.Command("git", "-C", path, operation, "--abort").CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(out))
+	if detail == "" {
+		return fmt.Errorf("git %s --abort: %w", operation, err)
+	}
+	return fmt.Errorf("git %s --abort: %w: %s", operation, err, detail)
 }

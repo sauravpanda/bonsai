@@ -112,7 +112,11 @@ bonsai push feat/search
 bonsai push --pr
 bonsai push --web
 bonsai push --pr --remove
+bonsai push --pr --remove --yes
 ```
+
+`--remove` asks before deleting the worktree. Add `--yes` only when that
+removal has already been approved in an automated workflow.
 
 ### `bonsai clean`
 
