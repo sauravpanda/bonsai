@@ -1,0 +1,16 @@
+{
+  "name": "bonsai-tools",
+  "owner": {
+    "name": "Saurav Panda"
+  },
+  "description": "Bonsai tools for safe AI coding worktree management",
+  "plugins": [
+    {
+      "name": "bonsai",
+      "source": "./",
+      "description": "Safely analyze and clean up Claude Code git worktrees",
+      "category": "development",
+      "tags": ["git", "worktrees", "cleanup", "claude-code"]
+    }
+  ]
+}

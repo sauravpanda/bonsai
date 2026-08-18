@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bonsai Cleanup"
+  short_description: "Safely prune Claude Code worktrees"
+  default_prompt: "Use $cleanup to safely analyze and clean up my Claude Code worktrees."

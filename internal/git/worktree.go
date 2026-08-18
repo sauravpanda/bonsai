@@ -14,27 +14,65 @@ import (
 
 // Worktree represents a git worktree with enriched metadata.
 type Worktree struct {
-	Path        string
-	Branch      string
-	HEAD        string
-	IsMain      bool
-	IsDetached  bool
-	Age         time.Duration
-	LastCommit  string
-	AheadBase   int
-	BehindBase  int
-	PRStatus    string // "merged", "open", "closed", "none", "unknown"
-	PRURL       string
-	HasUnpushed bool
+	Path               string
+	RepositoryRoot     string
+	Branch             string
+	HEAD               string
+	IsMain             bool
+	IsDetached         bool
+	IsLocked           bool
+	LockReason         string
+	IsInUse            bool
+	InUseKnown         bool
+	IsPrunable         bool
+	PrunableReason     string
+	Age                time.Duration
+	CreatedAt          time.Time
+	ActivityAt         time.Time
+	LastCommit         string
+	AheadBase          int
+	BehindBase         int
+	PRStatus           string // "merged", "open", "closed", "none", "unknown"
+	PRURL              string
+	PRNumber           int
+	PRHeadOID          string
+	HasUnpushed        bool
+	UnpushedCommits    int
+	UnpushedKnown      bool
+	RemoteBranchExists bool
+	MergedIntoBase     bool
+	BaseStatusKnown    bool
+	DirtyFiles         int
+	StagedFiles        int
+	UntrackedFiles     int
+	StatusKnown        bool
+}
+
+// HasWorkingChanges reports whether removing the worktree would discard
+// staged, modified, or untracked files.
+func (wt *Worktree) HasWorkingChanges() bool {
+	return wt.DirtyFiles > 0 || wt.StagedFiles > 0 || wt.UntrackedFiles > 0
 }
 
 // List returns all git worktrees parsed from `git worktree list --porcelain`.
 func List() ([]*Worktree, error) {
-	out, err := run("git", "worktree", "list", "--porcelain")
+	return ListAt(".")
+}
+
+// ListAt returns all worktrees registered to the repository containing path.
+func ListAt(path string) ([]*Worktree, error) {
+	out, err := run("git", "-C", path, "worktree", "list", "--porcelain")
 	if err != nil {
-		return nil, fmt.Errorf("git worktree list: %w", err)
+		return nil, fmt.Errorf("git worktree list at %s: %w", path, err)
 	}
-	return parsePorcelain(out), nil
+	worktrees := parsePorcelain(out)
+	if len(worktrees) > 0 {
+		repositoryRoot := worktrees[0].Path
+		for _, wt := range worktrees {
+			wt.RepositoryRoot = repositoryRoot
+		}
+	}
+	return worktrees, nil
 }
 
 func parsePorcelain(out string) []*Worktree {
@@ -61,28 +99,93 @@ func parsePorcelain(out string) []*Worktree {
 		case cur != nil && line == "detached":
 			cur.IsDetached = true
 			cur.Branch = "(detached)"
+		case cur != nil && (line == "locked" || strings.HasPrefix(line, "locked ")):
+			cur.IsLocked = true
+			cur.LockReason = strings.TrimSpace(strings.TrimPrefix(line, "locked"))
+		case cur != nil && (line == "prunable" || strings.HasPrefix(line, "prunable ")):
+			cur.IsPrunable = true
+			cur.PrunableReason = strings.TrimSpace(strings.TrimPrefix(line, "prunable"))
 		}
 	}
 	return worktrees
 }
 
-// Enrich fetches age, last commit message, ahead/behind, and unpushed status.
+// Enrich fetches activity, working tree state, ahead/behind, and recovery
+// information used by both display and safe cleanup commands.
 func Enrich(wt *Worktree, base, remote string) {
-	out, err := runIn(wt.Path, "git", "log", "-1", "--format=%ar|%s")
+	wt.CreatedAt = worktreeCreatedAt(wt.Path)
+	latestActivity := wt.CreatedAt
+
+	out, err := runIn(wt.Path, "git", "log", "-1", "--format=%ct|%s")
 	if err == nil {
 		parts := strings.SplitN(strings.TrimSpace(out), "|", 2)
 		if len(parts) == 2 {
-			wt.Age = ParseRelativeAge(parts[0])
+			if unix, parseErr := strconv.ParseInt(parts[0], 10, 64); parseErr == nil {
+				commitAt := time.Unix(unix, 0)
+				if commitAt.After(latestActivity) {
+					latestActivity = commitAt
+				}
+			}
 			wt.LastCommit = parts[1]
 		}
 	}
+	wt.ActivityAt = latestActivity
+	if !latestActivity.IsZero() && time.Now().After(latestActivity) {
+		wt.Age = time.Since(latestActivity)
+	}
+
+	wt.DirtyFiles, wt.StagedFiles, wt.UntrackedFiles, wt.StatusKnown = WorkingTreeStatus(wt.Path)
 
 	if wt.IsDetached || wt.Branch == "" || wt.Branch == "(detached)" {
 		return
 	}
 
 	wt.AheadBase, wt.BehindBase = aheadBehind(wt.Path, wt.Branch, base, remote)
-	wt.HasUnpushed = hasUnpushed(wt.Path, wt.Branch, base, remote)
+	wt.UnpushedCommits, wt.RemoteBranchExists, wt.UnpushedKnown = unpushedStatus(wt.Path, wt.Branch, base, remote)
+	wt.HasUnpushed = wt.UnpushedKnown && wt.UnpushedCommits > 0
+	wt.MergedIntoBase, wt.BaseStatusKnown = mergedIntoBase(wt.Path, wt.Branch, base, remote)
+}
+
+func worktreeCreatedAt(path string) time.Time {
+	// Added worktrees contain a .git pointer file created with the worktree.
+	// Its timestamp avoids treating a new worktree based on an old commit as
+	// stale. Main worktrees have a .git directory and are never cleanup targets.
+	info, err := os.Stat(filepath.Join(path, ".git"))
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
+// WorkingTreeStatus counts modified, staged, and untracked entries. known is
+// false when git status cannot safely inspect the worktree.
+func WorkingTreeStatus(path string) (dirty, staged, untracked int, known bool) {
+	out, err := runIn(path, "git", "status", "--porcelain=v1", "--untracked-files=normal")
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	dirty, staged, untracked = parseWorkingTreeStatus(out)
+	return dirty, staged, untracked, true
+}
+
+func parseWorkingTreeStatus(out string) (dirty, staged, untracked int) {
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		x, y := line[0], line[1]
+		if x == '?' && y == '?' {
+			untracked++
+			continue
+		}
+		if x != ' ' && x != '?' {
+			staged++
+		}
+		if y != ' ' && y != '?' {
+			dirty++
+		}
+	}
+	return dirty, staged, untracked
 }
 
 func aheadBehind(path, branch, base, remote string) (int, int) {
@@ -103,36 +206,90 @@ func aheadBehind(path, branch, base, remote string) (int, int) {
 	return a, b
 }
 
-func hasUnpushed(path, branch, base, remote string) bool {
+func unpushedStatus(path, branch, base, remote string) (count int, remoteExists, known bool) {
 	remoteRef := remote + "/" + branch
-	out, err := runIn(path, "git", "rev-list", "--count", remoteRef+".."+branch)
-	if err != nil {
-		// No remote branch exists yet. Count only commits unique to this branch
-		// relative to the configured base branch instead of the full history.
-		baseRef := remote + "/" + base
-		out2, err2 := runIn(path, "git", "rev-list", "--count", baseRef+".."+branch)
-		if err2 != nil {
-			out2, err2 = runIn(path, "git", "rev-list", "--count", base+".."+branch)
-			if err2 != nil {
-				return false
-			}
+	remoteExists = refExists(path, "refs/remotes/"+remoteRef)
+	if remoteExists {
+		out, err := runIn(path, "git", "rev-list", "--count", remoteRef+".."+branch)
+		if err != nil {
+			return 0, true, false
 		}
-		n, _ := strconv.Atoi(strings.TrimSpace(out2))
-		return n > 0
+		n, err := strconv.Atoi(strings.TrimSpace(out))
+		return n, true, err == nil
 	}
-	n, _ := strconv.Atoi(strings.TrimSpace(out))
-	return n > 0
+
+	// No remote branch exists yet. Count only commits unique to this branch
+	// relative to the configured base branch instead of the full history.
+	baseRef := remote + "/" + base
+	out, err := runIn(path, "git", "rev-list", "--count", baseRef+".."+branch)
+	if err != nil {
+		out, err = runIn(path, "git", "rev-list", "--count", base+".."+branch)
+		if err != nil {
+			return 0, false, false
+		}
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	return n, false, err == nil
+}
+
+func mergedIntoBase(path, branch, base, remote string) (bool, bool) {
+	baseRef := remote + "/" + base
+	if !refExists(path, "refs/remotes/"+baseRef) {
+		baseRef = base
+		if !refExists(path, "refs/heads/"+base) {
+			return false, false
+		}
+	}
+	err := exec.Command("git", "-C", path, "merge-base", "--is-ancestor", branch, baseRef).Run()
+	if err == nil {
+		return true, true
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, true
+	}
+	return false, false
+}
+
+func refExists(path, ref string) bool {
+	return exec.Command("git", "-C", path, "show-ref", "--verify", "--quiet", ref).Run() == nil
 }
 
 // Remove removes a worktree (with optional --force).
 func Remove(path string, force bool) error {
-	args := []string{"worktree", "remove", path}
+	return RemoveAt(".", path, force)
+}
+
+// RemoveAt removes a worktree registered to the repository containing repoPath.
+func RemoveAt(repoPath, path string, force bool) error {
+	args := []string{"worktree", "remove"}
 	if force {
 		args = append(args, "--force")
 	}
+	args = append(args, "--", path)
+	args = append([]string{"-C", repoPath}, args...)
 	_, err := run("git", args...)
 	if err != nil {
 		return fmt.Errorf("git worktree remove %s: %w", path, err)
+	}
+	return nil
+}
+
+// DeleteBranch deletes a local branch after its worktree has been removed.
+// Callers must establish that the branch is recoverable before using force.
+func DeleteBranch(branch string, force bool) error {
+	return DeleteBranchAt(".", branch, force)
+}
+
+// DeleteBranchAt deletes a local branch in a specific repository.
+func DeleteBranchAt(repoPath, branch string, force bool) error {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	_, err := run("git", "-C", repoPath, "branch", flag, "--", branch)
+	if err != nil {
+		return fmt.Errorf("git branch %s %s: %w", flag, branch, err)
 	}
 	return nil
 }

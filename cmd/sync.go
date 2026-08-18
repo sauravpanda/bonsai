@@ -80,12 +80,16 @@ func runSync(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Check for uncommitted changes.
-		dirty, _, _ := parseStatus(wt.Path)
-		if dirty > 0 {
+		// Check for every kind of uncommitted work, not only modified files.
+		dirty, staged, untracked, known := git.WorkingTreeStatus(wt.Path)
+		if !known || dirty+staged+untracked > 0 {
+			detail := fmt.Sprintf("%d modified, %d staged, %d untracked", dirty, staged, untracked)
+			if !known {
+				detail = "working tree status unavailable"
+			}
 			fmt.Printf("  %-28s  %s\n",
 				truncate(branch, 28),
-				warnStyle.Render(fmt.Sprintf("skipped — %d dirty file(s)", dirty)),
+				warnStyle.Render("skipped — "+detail),
 			)
 			skipped++
 			continue
