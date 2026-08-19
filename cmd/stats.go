@@ -20,13 +20,34 @@ import (
 var statsCmd = &cobra.Command{
 	Use:   "stats",
 	Short: "Aggregate metrics across all worktrees",
-	Long:  `Show a health snapshot of all worktrees: counts by state, disk usage, and age distribution.`,
-	RunE:  runStats,
+	Long: `Show a health snapshot of all worktrees: counts by state, disk usage, and age distribution.
+
+Pass --json to emit one aggregate object without progress output.`,
+	RunE: runStats,
 }
 
 func init() {
 	rootCmd.AddCommand(statsCmd)
 	statsCmd.Flags().Bool("offline", false, "skip GitHub PR status lookup")
+	statsCmd.Flags().Bool("json", false, "emit aggregate metrics as JSON to stdout (no progress output)")
+}
+
+type statsJSONAgeDistribution struct {
+	UnderOneDay       int `json:"under_1_day"`
+	OneToSevenDays    int `json:"one_to_seven_days"`
+	SevenToThirtyDays int `json:"seven_to_thirty_days"`
+	OverThirtyDays    int `json:"over_30_days"`
+}
+
+// statsJSON is the stable machine-readable shape emitted by `bonsai stats --json`.
+type statsJSON struct {
+	TotalWorktrees     int                      `json:"total_worktrees"`
+	StaleWorktrees     int                      `json:"stale_worktrees"`
+	OpenPRs            int                      `json:"open_prs"`
+	UnpushedWorktrees  int                      `json:"unpushed_worktrees"`
+	DiskBytes          int64                    `json:"disk_bytes"`
+	StaleThresholdDays int                      `json:"stale_threshold_days"`
+	AgeDistribution    statsJSONAgeDistribution `json:"age_distribution"`
 }
 
 func dirSize(path string) int64 {
@@ -65,6 +86,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 	}
 
 	offline, _ := cmd.Flags().GetBool("offline")
+	asJSON, _ := cmd.Flags().GetBool("json")
 	ghOK := !offline && github.IsAvailable()
 
 	worktrees, err := git.List()
@@ -74,11 +96,17 @@ func runStats(cmd *cobra.Command, args []string) error {
 
 	added := AddedWorktrees(worktrees)
 	if len(added) == 0 {
+		if asJSON {
+			return writeJSON(statsJSON{StaleThresholdDays: cfg.StaleThresholdDays})
+		}
 		fmt.Println("  no added worktrees")
 		return nil
 	}
 
-	spin := tui.Start(fmt.Sprintf("collecting stats for %d worktree(s)…", len(added)))
+	var spin *tui.Spinner
+	if !asJSON {
+		spin = tui.Start(fmt.Sprintf("collecting stats for %d worktree(s)…", len(added)))
+	}
 	var g errgroup.Group
 	for _, wt := range added {
 		wt := wt
@@ -101,61 +129,62 @@ func runStats(cmd *cobra.Command, args []string) error {
 		})
 	}
 	g.Wait() //nolint:errcheck
-	spin.Stop()
+	if spin != nil {
+		spin.Stop()
+	}
 
 	staleDur := staleDuration(cfg.StaleThresholdDays)
-
-	var (
-		staleCount    int
-		openPRCount   int
-		unpushedCount int
-		diskTotal     int64
-
-		bucket1d  int // < 1 day
-		bucket7d  int // 1-7 days
-		bucket30d int // 7-30 days
-		bucketOld int // > 30 days
-	)
-
-	for _, wt := range added {
-		if float64(wt.Age) >= staleDur {
-			staleCount++
-		}
-		if wt.PRStatus == "open" {
-			openPRCount++
-		}
-		if wt.HasUnpushed {
-			unpushedCount++
-		}
-		diskTotal += dirSize(wt.Path)
-
-		switch {
-		case wt.Age < 24*time.Hour:
-			bucket1d++
-		case wt.Age < 7*24*time.Hour:
-			bucket7d++
-		case wt.Age < 30*24*time.Hour:
-			bucket30d++
-		default:
-			bucketOld++
-		}
+	metrics := buildStatsJSON(added, staleDur, cfg.StaleThresholdDays)
+	if asJSON {
+		return writeJSON(metrics)
 	}
 
 	sep := dimStyle.Render("  " + strings.Repeat("─", 40))
 	fmt.Println(sep)
-	fmt.Printf("  %s  %s\n", boldStyle.Render("Total worktrees:"), fmt.Sprint(len(added)))
-	fmt.Printf("  %s  %s\n", boldStyle.Render("Stale (≥ threshold): "), staleStyle(staleCount, errStyle))
-	fmt.Printf("  %s  %s\n", boldStyle.Render("Open PRs:            "), staleStyle(openPRCount, okStyle))
-	fmt.Printf("  %s  %s\n", boldStyle.Render("Unpushed commits:    "), staleStyle(unpushedCount, warnStyle))
-	fmt.Printf("  %s  %s\n", boldStyle.Render("Total disk usage:    "), formatBytes(diskTotal))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Total worktrees:"), fmt.Sprint(metrics.TotalWorktrees))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Stale (≥ threshold): "), staleStyle(metrics.StaleWorktrees, errStyle))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Open PRs:            "), staleStyle(metrics.OpenPRs, okStyle))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Unpushed commits:    "), staleStyle(metrics.UnpushedWorktrees, warnStyle))
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Total disk usage:    "), formatBytes(metrics.DiskBytes))
 	fmt.Println(sep)
 	fmt.Println("  " + boldStyle.Render("Age distribution:"))
-	fmt.Printf("    < 1 day   : %d\n", bucket1d)
-	fmt.Printf("    1-7 days  : %d\n", bucket7d)
-	fmt.Printf("    7-30 days : %d\n", bucket30d)
-	fmt.Printf("    > 30 days : %d\n", bucketOld)
+	fmt.Printf("    < 1 day   : %d\n", metrics.AgeDistribution.UnderOneDay)
+	fmt.Printf("    1-7 days  : %d\n", metrics.AgeDistribution.OneToSevenDays)
+	fmt.Printf("    7-30 days : %d\n", metrics.AgeDistribution.SevenToThirtyDays)
+	fmt.Printf("    > 30 days : %d\n", metrics.AgeDistribution.OverThirtyDays)
 	fmt.Println(sep)
 	return nil
+}
+
+func buildStatsJSON(worktrees []*git.Worktree, staleDur float64, staleThresholdDays int) statsJSON {
+	metrics := statsJSON{
+		TotalWorktrees:     len(worktrees),
+		StaleThresholdDays: staleThresholdDays,
+	}
+	for _, wt := range worktrees {
+		if float64(wt.Age) >= staleDur {
+			metrics.StaleWorktrees++
+		}
+		if wt.PRStatus == "open" {
+			metrics.OpenPRs++
+		}
+		if wt.HasUnpushed {
+			metrics.UnpushedWorktrees++
+		}
+		metrics.DiskBytes += dirSize(wt.Path)
+
+		switch {
+		case wt.Age < 24*time.Hour:
+			metrics.AgeDistribution.UnderOneDay++
+		case wt.Age < 7*24*time.Hour:
+			metrics.AgeDistribution.OneToSevenDays++
+		case wt.Age < 30*24*time.Hour:
+			metrics.AgeDistribution.SevenToThirtyDays++
+		default:
+			metrics.AgeDistribution.OverThirtyDays++
+		}
+	}
+	return metrics
 }
 
 func staleStyle(n int, nonZeroStyle lipgloss.Style) string {
