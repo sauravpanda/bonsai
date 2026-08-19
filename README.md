@@ -225,6 +225,17 @@ gh auth login
 
 Without `gh`, bonsai still works and falls back to local Git safety checks.
 
+## Plain Output
+
+Bonsai automatically disables ANSI colors when stdout is redirected or piped.
+Set `NO_COLOR` to any non-empty value or pass the global `--no-color` flag to
+force plain output in a terminal:
+
+```bash
+NO_COLOR=1 bonsai list
+bonsai --no-color status
+```
+
 ## License
 
 MIT

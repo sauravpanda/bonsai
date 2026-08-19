@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	runewidth "github.com/mattn/go-runewidth"
@@ -81,11 +83,16 @@ func runList(cmd *cobra.Command, args []string) error {
 	filterNoPR, _ := cmd.Flags().GetBool("no-pr")
 	offline, _ := cmd.Flags().GetBool("offline")
 	asJSON, _ := cmd.Flags().GetBool("json")
-	ghOK := !offline && github.IsAvailable()
-
-	if !ghOK && !offline && !asJSON {
-		fmt.Fprintln(os.Stderr, "  note: gh CLI not authenticated — PR status unavailable")
+	var ghAvailabilityErr error
+	if !offline {
+		ghAvailabilityErr = github.CheckAvailable()
 	}
+	ghOK := !offline && ghAvailabilityErr == nil
+	var prLookupErrors []error
+	var prLookupErrorsMu sync.Mutex
+	defer func() {
+		writePRStatusNote(os.Stderr, ghAvailabilityErr, prLookupErrors)
+	}()
 
 	root, _ := git.MainRoot()
 
@@ -110,6 +117,9 @@ func runList(cmd *cobra.Command, args []string) error {
 					wt.PRStatus = "none"
 				} else {
 					wt.PRStatus = "unknown"
+					prLookupErrorsMu.Lock()
+					prLookupErrors = append(prLookupErrors, err)
+					prLookupErrorsMu.Unlock()
 				}
 			} else if wt.IsMain {
 				wt.PRStatus = "—"
@@ -154,6 +164,22 @@ func runList(cmd *cobra.Command, args []string) error {
 	staleDur := staleDuration(cfg.StaleThresholdDays)
 	printTable(worktrees, root, staleDur)
 	return nil
+}
+
+func writePRStatusNote(w io.Writer, availabilityErr error, lookupErrors []error) {
+	if availabilityErr != nil {
+		fmt.Fprintf(w, "  note: GitHub PR status unavailable: %v\n", availabilityErr)
+		return
+	}
+	if len(lookupErrors) == 0 {
+		return
+	}
+	label := "lookup"
+	if len(lookupErrors) != 1 {
+		label = "lookups"
+	}
+	fmt.Fprintf(w, "  note: %d GitHub PR %s failed; status marked unknown (first: %v)\n",
+		len(lookupErrors), label, lookupErrors[0])
 }
 
 func matchesNoPRFilter(wt *git.Worktree) bool {
