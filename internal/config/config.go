@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,13 +12,13 @@ import (
 
 // Config holds bonsai configuration.
 type Config struct {
-	StaleThresholdDays int    `toml:"stale_threshold_days"`
-	DefaultRemote      string `toml:"default_remote"`
-	DefaultBase        string `toml:"default_base"`
+	StaleThresholdDays int    `toml:"stale_threshold_days" json:"stale_threshold_days"`
+	DefaultRemote      string `toml:"default_remote" json:"default_remote"`
+	DefaultBase        string `toml:"default_base" json:"default_base"`
 	// TicketPattern is a Go regexp with a capturing group that extracts a
 	// ticket ID from a branch name (e.g. "([A-Z]+-\\d+)").
 	// If empty, ticket auto-linking is disabled.
-	TicketPattern string `toml:"ticket_pattern"`
+	TicketPattern string `toml:"ticket_pattern" json:"ticket_pattern"`
 }
 
 func Default() *Config {
@@ -45,7 +46,7 @@ func LoadForRepo(repoRoot string) (*Config, error) {
 	// 1. Apply global config.
 	if p := Path(); fileExists(p) {
 		if _, err := toml.DecodeFile(p, cfg); err != nil {
-			return cfg, err
+			return cfg, fmt.Errorf("%s: %w", p, err)
 		}
 	}
 
@@ -54,7 +55,7 @@ func LoadForRepo(repoRoot string) (*Config, error) {
 		repoPath := filepath.Join(repoRoot, ".bonsai.toml")
 		if fileExists(repoPath) {
 			if _, err := toml.DecodeFile(repoPath, cfg); err != nil {
-				return cfg, err
+				return cfg, fmt.Errorf("%s: %w", repoPath, err)
 			}
 		}
 	}

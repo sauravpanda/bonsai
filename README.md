@@ -222,6 +222,17 @@ ticket_pattern = "([A-Z]+-\\d+)"
 
 Per-repo overrides are supported with `.bonsai.toml` at the repo root.
 
+Validate both config layers and print the merged effective values:
+
+```bash
+bonsai config check
+bonsai config check --json
+```
+
+The check reports the exact source and line for invalid TOML or values, and
+warns when it finds unknown keys. Syntax, type, and value errors return a
+non-zero exit code; unknown-key warnings do not.
+
 ## GitHub Integration
 
 If `gh` is installed and authenticated, bonsai can:
