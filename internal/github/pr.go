@@ -21,7 +21,20 @@ var ErrNoPR = errors.New("no pull request for branch")
 
 // IsAvailable returns true if gh CLI is installed and authenticated.
 func IsAvailable() bool {
-	return exec.Command("gh", "auth", "status").Run() == nil
+	return CheckAvailable() == nil
+}
+
+// CheckAvailable verifies that gh is installed and authenticated, preserving
+// the command's diagnostic output for callers that need to explain failures.
+func CheckAvailable() error {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return fmt.Errorf("gh CLI not found: %w", err)
+	}
+	out, err := exec.Command("gh", "auth", "status").CombinedOutput()
+	if err != nil {
+		return commandError("gh auth status", err, out)
+	}
+	return nil
 }
 
 // GetPR fetches PR info for the given branch. Returns nil if no PR exists.
@@ -45,11 +58,19 @@ func GetPRAt(repoPath, branch string) (*PRInfo, error) {
 			strings.Contains(msg, "could not find pull request") {
 			return nil, fmt.Errorf("%w: %q", ErrNoPR, branch)
 		}
-		return nil, fmt.Errorf("gh pr view %q: %w", branch, err)
+		return nil, commandError(fmt.Sprintf("gh pr view %q", branch), err, out)
 	}
 	var pr PRInfo
 	if err := json.Unmarshal(out, &pr); err != nil {
 		return nil, err
 	}
 	return &pr, nil
+}
+
+func commandError(operation string, err error, output []byte) error {
+	detail := strings.Join(strings.Fields(string(output)), " ")
+	if detail == "" {
+		return fmt.Errorf("%s: %w", operation, err)
+	}
+	return fmt.Errorf("%s: %s", operation, detail)
 }
