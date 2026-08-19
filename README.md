@@ -185,6 +185,19 @@ bonsai snapshot    # archive a worktree before deleting it
 bonsai doctor      # detect broken or orphaned worktrees
 ```
 
+For scripts, CI, and coding agents, the dashboard commands provide structured
+output on stdout without spinner or progress text:
+
+```bash
+bonsai list --json
+bonsai status --json
+bonsai stats --json
+bonsai sync --dry-run --json
+```
+
+`sync --json` reports each non-main worktree as `synced`, `skipped`, or
+`failed`, with a reason or error when applicable.
+
 ## Safety Defaults
 
 - Classifies candidates as `safe`, `review`, or `protected`

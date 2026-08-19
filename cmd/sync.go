@@ -24,7 +24,8 @@ Flags:
 Examples:
   bonsai sync
   bonsai sync --merge
-  bonsai sync --dry-run`,
+  bonsai sync --dry-run
+  bonsai sync --dry-run --json`,
 	RunE: runSync,
 }
 
@@ -32,6 +33,33 @@ func init() {
 	rootCmd.AddCommand(syncCmd)
 	syncCmd.Flags().Bool("merge", false, "use git merge instead of git rebase")
 	syncCmd.Flags().Bool("dry-run", false, "show what would be synced without running")
+	syncCmd.Flags().Bool("json", false, "emit per-worktree results as JSON to stdout")
+}
+
+type syncJSONResult struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+	Result string `json:"result"`
+	Reason string `json:"reason,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+type syncJSONSummary struct {
+	Synced  int `json:"synced"`
+	Skipped int `json:"skipped"`
+	Failed  int `json:"failed"`
+}
+
+// syncJSONOutput is the stable machine-readable shape emitted by
+// `bonsai sync --json`.
+type syncJSONOutput struct {
+	Base       string           `json:"base"`
+	Remote     string           `json:"remote"`
+	Strategy   string           `json:"strategy"`
+	DryRun     bool             `json:"dry_run"`
+	FetchError string           `json:"fetch_error,omitempty"`
+	Results    []syncJSONResult `json:"results"`
+	Summary    syncJSONSummary  `json:"summary"`
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
@@ -42,6 +70,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	useMerge, _ := cmd.Flags().GetBool("merge")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	asJSON, _ := cmd.Flags().GetBool("json")
 
 	worktrees, err := git.List()
 	if err != nil {
@@ -50,22 +79,36 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	base := cfg.DefaultBase
 	remote := cfg.DefaultRemote
-
-	// Fetch the base branch first.
-	if !dryRun {
-		fmt.Printf("  fetching %s/%s …\n", remote, base)
-		fetchCmd := exec.Command("git", "fetch", remote, base)
-		fetchCmd.Stdout = os.Stdout
-		fetchCmd.Stderr = os.Stderr
-		if err := fetchCmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "  warning: fetch failed: %v\n", err)
-		}
-	}
-
 	verb := "rebase"
 	if useMerge {
 		verb = "merge"
 	}
+	jsonOutput := syncJSONOutput{
+		Base:     base,
+		Remote:   remote,
+		Strategy: verb,
+		DryRun:   dryRun,
+		Results:  make([]syncJSONResult, 0),
+	}
+
+	// Fetch the base branch first.
+	if !dryRun {
+		fetchCmd := exec.Command("git", "fetch", remote, base)
+		if asJSON {
+			out, fetchErr := fetchCmd.CombinedOutput()
+			if fetchErr != nil {
+				jsonOutput.FetchError = commandFailure(fetchErr, out)
+			}
+		} else {
+			fmt.Printf("  fetching %s/%s …\n", remote, base)
+			fetchCmd.Stdout = os.Stdout
+			fetchCmd.Stderr = os.Stderr
+			if err := fetchCmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "  warning: fetch failed: %v\n", err)
+			}
+		}
+	}
+
 	baseRef := remote + "/" + base
 
 	var synced, skipped, failed int
@@ -77,6 +120,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 		branch := wt.Branch
 		if branch == "" || branch == "(detached)" {
+			if asJSON {
+				jsonOutput.Results = append(jsonOutput.Results, syncJSONResult{
+					Path: wt.Path, Branch: branch, Result: "skipped", Reason: "detached worktree",
+				})
+				skipped++
+			}
 			continue
 		}
 
@@ -87,23 +136,39 @@ func runSync(cmd *cobra.Command, args []string) error {
 			if !known {
 				detail = "working tree status unavailable"
 			}
-			fmt.Printf("  %-28s  %s\n",
-				truncate(branch, 28),
-				warnStyle.Render("skipped — "+detail),
-			)
+			if asJSON {
+				jsonOutput.Results = append(jsonOutput.Results, syncJSONResult{
+					Path: wt.Path, Branch: branch, Result: "skipped", Reason: detail,
+				})
+			} else {
+				fmt.Printf("  %-28s  %s\n",
+					truncate(branch, 28),
+					warnStyle.Render("skipped — "+detail),
+				)
+			}
 			skipped++
 			continue
 		}
 
 		if dryRun {
-			fmt.Printf("  %-28s  %s\n",
-				truncate(branch, 28),
-				dimStyle.Render(fmt.Sprintf("[dry-run] would %s from %s", verb, baseRef)),
-			)
+			detail := fmt.Sprintf("dry-run: would %s from %s", verb, baseRef)
+			if asJSON {
+				jsonOutput.Results = append(jsonOutput.Results, syncJSONResult{
+					Path: wt.Path, Branch: branch, Result: "skipped", Reason: detail,
+				})
+				skipped++
+			} else {
+				fmt.Printf("  %-28s  %s\n",
+					truncate(branch, 28),
+					dimStyle.Render(fmt.Sprintf("[dry-run] would %s from %s", verb, baseRef)),
+				)
+			}
 			continue
 		}
 
-		fmt.Printf("  %-28s  %s … ", truncate(branch, 28), verb)
+		if !asJSON {
+			fmt.Printf("  %-28s  %s … ", truncate(branch, 28), verb)
+		}
 
 		var syncArgs []string
 		if useMerge {
@@ -116,25 +181,48 @@ func runSync(cmd *cobra.Command, args []string) error {
 		outStr := strings.TrimSpace(string(out))
 
 		if err != nil {
-			fmt.Println(errStyle.Render("failed"))
-			if outStr != "" {
-				for _, line := range strings.Split(outStr, "\n") {
-					fmt.Printf("    %s\n", line)
+			failure := commandFailure(err, out)
+			if !asJSON {
+				fmt.Println(errStyle.Render("failed"))
+				if outStr != "" {
+					for _, line := range strings.Split(outStr, "\n") {
+						fmt.Printf("    %s\n", line)
+					}
 				}
 			}
 			// Abort on conflict so the worktree is not left in a broken state.
 			if abortErr := abortFailedSync(wt.Path, useMerge); abortErr != nil {
-				fmt.Fprintf(os.Stderr, "    %s\n",
-					warnStyle.Render("warning: could not abort cleanly: "+abortErr.Error()))
+				failure += "; could not abort cleanly: " + abortErr.Error()
+				if !asJSON {
+					fmt.Fprintf(os.Stderr, "    %s\n",
+						warnStyle.Render("warning: could not abort cleanly: "+abortErr.Error()))
+				}
+			}
+			if asJSON {
+				jsonOutput.Results = append(jsonOutput.Results, syncJSONResult{
+					Path: wt.Path, Branch: branch, Result: "failed", Error: failure,
+				})
 			}
 			failed++
 		} else {
-			fmt.Println(okStyle.Render("ok"))
+			if asJSON {
+				jsonOutput.Results = append(jsonOutput.Results, syncJSONResult{
+					Path: wt.Path, Branch: branch, Result: "synced",
+				})
+			} else {
+				fmt.Println(okStyle.Render("ok"))
+			}
 			synced++
 		}
 	}
+	jsonOutput.Summary = syncJSONSummary{Synced: synced, Skipped: skipped, Failed: failed}
+	if asJSON {
+		if err := writeJSON(jsonOutput); err != nil {
+			return err
+		}
+	}
 
-	if !dryRun {
+	if !dryRun && !asJSON {
 		fmt.Printf("\n%s synced, %s skipped, %s failed\n",
 			okStyle.Render(fmt.Sprint(synced)),
 			dimStyle.Render(fmt.Sprint(skipped)),
@@ -146,6 +234,14 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func commandFailure(err error, output []byte) string {
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return err.Error()
+	}
+	return detail
 }
 
 func abortFailedSync(path string, useMerge bool) error {

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sauravpanda/bonsai/internal/config"
 	"github.com/sauravpanda/bonsai/internal/git"
@@ -19,12 +20,15 @@ var statusCmd = &cobra.Command{
   - staged (files in the index)
   - untracked files
   - ahead/behind the base branch
-  - current branch and last commit`,
+  - current branch and last commit
+
+Pass --json to emit one object per worktree without progress output.`,
 	RunE: runStatus,
 }
 
 func init() {
 	rootCmd.AddCommand(statusCmd)
+	statusCmd.Flags().Bool("json", false, "emit dashboard data as JSON to stdout (no progress output)")
 }
 
 type wtStatus struct {
@@ -32,6 +36,25 @@ type wtStatus struct {
 	dirty     int
 	staged    int
 	untracked int
+}
+
+// statusJSONWorktree is the stable machine-readable shape emitted by
+// `bonsai status --json`.
+type statusJSONWorktree struct {
+	Path           string `json:"path"`
+	Branch         string `json:"branch"`
+	HEAD           string `json:"head,omitempty"`
+	IsMain         bool   `json:"is_main"`
+	IsDetached     bool   `json:"is_detached,omitempty"`
+	AgeSeconds     int64  `json:"age_seconds"`
+	AgeHuman       string `json:"age_human"`
+	LastCommit     string `json:"last_commit,omitempty"`
+	AheadBase      int    `json:"ahead_base"`
+	BehindBase     int    `json:"behind_base"`
+	StagedFiles    int    `json:"staged_files"`
+	DirtyFiles     int    `json:"dirty_files"`
+	UntrackedFiles int    `json:"untracked_files"`
+	StatusKnown    bool   `json:"status_known"`
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
@@ -50,7 +73,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		statuses[i].wt = wt
 	}
 
-	spin := tui.Start(fmt.Sprintf("collecting status for %d worktree(s)…", len(worktrees)))
+	asJSON, _ := cmd.Flags().GetBool("json")
+	var spin *tui.Spinner
+	if !asJSON {
+		spin = tui.Start(fmt.Sprintf("collecting status for %d worktree(s)…", len(worktrees)))
+	}
 	var g errgroup.Group
 	for i, wt := range worktrees {
 		i, wt := i, wt
@@ -65,7 +92,13 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if err := g.Wait(); err != nil {
 		return err
 	}
-	spin.Stop()
+	if spin != nil {
+		spin.Stop()
+	}
+
+	if asJSON {
+		return writeJSON(buildStatusJSON(statuses))
+	}
 
 	staleDur := staleDuration(cfg.StaleThresholdDays)
 
@@ -125,4 +158,28 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	fmt.Println(dimStyle.Render("  " + strings.Repeat("─", 90)))
 	return nil
+}
+
+func buildStatusJSON(statuses []wtStatus) []statusJSONWorktree {
+	out := make([]statusJSONWorktree, 0, len(statuses))
+	for _, status := range statuses {
+		wt := status.wt
+		out = append(out, statusJSONWorktree{
+			Path:           wt.Path,
+			Branch:         wt.Branch,
+			HEAD:           wt.HEAD,
+			IsMain:         wt.IsMain,
+			IsDetached:     wt.IsDetached,
+			AgeSeconds:     int64(wt.Age / time.Second),
+			AgeHuman:       git.FormatAge(wt.Age),
+			LastCommit:     wt.LastCommit,
+			AheadBase:      wt.AheadBase,
+			BehindBase:     wt.BehindBase,
+			StagedFiles:    status.staged,
+			DirtyFiles:     status.dirty,
+			UntrackedFiles: status.untracked,
+			StatusKnown:    wt.StatusKnown,
+		})
+	}
+	return out
 }
