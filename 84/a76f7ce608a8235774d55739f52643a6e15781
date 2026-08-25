@@ -1,0 +1,33 @@
+docs/configuration.md
+  s_1d1d00e8adfb17::t_005ad2edb29461 1-38
+docs/recovery.md
+  s_1d1d00e8adfb17::t_005ad2edb29461 1-44
+docs/_config.yml
+  s_1d1d00e8adfb17::t_e508740676152c 1-28
+docs/safety.md
+  s_1d1d00e8adfb17::t_005ad2edb29461 1-58
+docs/commands.md
+  s_1d1d00e8adfb17::t_ca8ca033bd33ed 1-217
+docs/agents.md
+  s_1d1d00e8adfb17::t_ec7ed750f27e9e 1-96
+docs/index.md
+  s_1d1d00e8adfb17::t_fa6d1172dd433e 1-70
+README.md
+  s_1d1d00e8adfb17::t_e17fdf81c15e78 5-6,21,27-30,37-40,44-45,48-50,53-55,57,60-64,67,69,71-73,75-76,78,80,83-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "84a76f7ce608a8235774d55739f52643a6e15781",
+  "prompts": {},
+  "sessions": {
+    "s_1d1d00e8adfb17": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a20ba55-02e6-4736-8e47-7c4eb7291e00",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Saurav Panda <sgp65@cornell.edu>"
+    }
+  }
+}
