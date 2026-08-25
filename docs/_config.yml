@@ -1,0 +1,28 @@
+title: Bonsai
+description: Safe git worktree cleanup for Claude Code and other coding agents
+remote_theme: just-the-docs/just-the-docs@v0.10.1
+
+url: https://sauravpanda.github.io
+baseurl: /bonsai
+
+color_scheme: dark
+search_enabled: true
+heading_anchors: true
+
+aux_links:
+  GitHub: https://github.com/sauravpanda/bonsai
+aux_links_new_tab: true
+
+nav_external_links:
+  - title: Report an issue
+    url: https://github.com/sauravpanda/bonsai/issues
+
+footer_content: >-
+  Bonsai is MIT licensed.
+
+plugins:
+  - jekyll-remote-theme
+
+exclude:
+  - Gemfile
+  - Gemfile.lock

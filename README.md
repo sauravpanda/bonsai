@@ -2,6 +2,8 @@
 
 Safe git worktree cleanup for Claude Code and other coding agents.
 
+📖 **[Documentation](https://sauravpanda.github.io/bonsai/)**
+
 Coding agents are very good at creating worktrees and very bad at deleting
 them. After a few weeks of agent-assisted work there are dozens scattered
 across your machine, quietly holding tens of gigabytes, and no quick way to
@@ -16,321 +18,72 @@ Bonsai moves that decision out of the model. It finds agent worktrees across
 your repositories, classifies each one as `safe`, `review`, or `protected`, and
 removes only the `safe` ones — no matter how the agent asks.
 
-- Finds agent worktrees across every repository on your laptop
-- Classifies each worktree as `safe`, `review`, or `protected`
-- Reports reclaimable disk space before anything is deleted
-- Protects dirty, unpushed, locked, current, in-use, and open-PR worktrees
-- Gives agents structured JSON and a short-lived plan/apply workflow
-- Can preserve every approved removal for `bonsai undo`
-
-## Claude Code quick start
-
-Install the binary:
+## Install
 
 ```bash
 go install github.com/sauravpanda/bonsai@latest
 ```
 
-Then install the bundled Claude Code plugin:
+Requires Go 1.25+. The [GitHub CLI](https://cli.github.com/) is optional, and
+adds PR status and PR creation.
+
+## Claude Code
 
 ```text
 /plugin marketplace add sauravpanda/bonsai
 /plugin install bonsai@bonsai-tools
 ```
 
-Ask Claude to clean up your worktrees naturally, or run:
-
-```text
-/bonsai:cleanup
-```
-
-Claude will scan the usual development directories, explain what Bonsai will
-remove and preserve, ask for approval, and apply the exact approved plan. The
-plugin enables recovery, so the latest removed worktree can be restored with:
-
-```bash
-bonsai undo
-```
+Then ask Claude to clean up your worktrees, or run `/bonsai:cleanup`. Claude
+scans your development directories, explains what it will remove and what it
+will preserve, reports the disk space you would reclaim, and asks before
+applying anything.
 
 ## Other coding agents
 
-Any agent that can run a shell and read JSON can use the same safe protocol:
+Any agent that can run a shell and read JSON can drive the same protocol —
+Codex, Cursor, OpenCode, Aider, and custom automation included.
 
 ```bash
-# 1. Create a recoverable, machine-readable cleanup plan.
-bonsai prune --global --keep-history --json
-
-# 2. Let the agent explain the plan and ask you to approve it.
-
-# 3. Apply only that exact plan after approval.
-bonsai prune --apply <plan-id> --yes --json
-
-# 4. Restore the newest removal if you change your mind.
-bonsai undo --json
+bonsai prune --global --keep-history --json   # plan
+bonsai prune --apply <plan-id> --yes --json   # apply, after approval
+bonsai undo --json                            # change your mind
 ```
 
-This works well with Codex, Cursor, OpenCode, Aider, shell-based agents, and
-custom automation. Plans expire after 15 minutes and are revalidated before
-anything is deleted. If a worktree changes after planning, apply stops before
-removing it.
+Plans expire after 15 minutes and are revalidated before anything is deleted.
+See [Agent integration](https://sauravpanda.github.io/bonsai/agents.html) for
+the full contract.
 
-A good agent instruction is:
+## Humans, too
 
-> Use Bonsai's JSON plan/apply workflow to find safe worktrees globally. Enable
-> keep-history, explain every safe, review, and protected result, ask before
-> applying the plan, and never run raw Git deletion commands.
+```bash
+bonsai new feat/search     # create a worktree and branch
+bonsai list                # see everything, with PR status
+bonsai push --pr           # push and open a PR
+bonsai clean               # interactively remove what has merged
+bonsai undo                # restore the last recoverable removal
+```
 
-## Install from source
+Full [command reference](https://sauravpanda.github.io/bonsai/commands.html).
+
+## Safety
+
+- Classifies every candidate as `safe`, `review`, or `protected`
+- Protects dirty, untracked, unpushed, locked, current, and open-PR worktrees
+- Never lets `--yes` or plan/apply remove a `review` or `protected` worktree
+- Revalidates saved plans before making any changes
+- Deletes local branches only when proven recoverable; never remote branches
+- Opt-in recovery with `--keep-history`, `bonsai undo`, and `bonsai trash`
+
+More on the [safety model](https://sauravpanda.github.io/bonsai/safety.html).
+
+## Contributing
 
 ```bash
 git clone https://github.com/sauravpanda/bonsai
 cd bonsai
 make install
-```
-
-Requirements:
-
-- Go 1.25+
-- Optional: [GitHub CLI](https://cli.github.com/) for PR status and PR creation
-
-## Human quick start
-
-```bash
-bonsai new feat/search
-bonsai list
-bonsai push --pr
-bonsai clean --keep-history
-bonsai undo
-```
-
-Typical flow:
-
-1. Create a worktree for a task.
-2. See all active worktrees in one place.
-3. Push and open a PR when the work is ready.
-4. Clean up merged or stale worktrees without guesswork.
-5. Undo a recoverable removal when needed.
-
-## Core Commands
-
-### `bonsai list`
-
-See every worktree with branch, age, last commit, ahead/behind status, and PR state.
-
-```bash
-bonsai list
-bonsai list --no-pr
-bonsai list --offline
-```
-
-Example output:
-
-```text
-  #   PATH                              BRANCH                AGE    LAST COMMIT              +/-      PR
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────
-      ~/projects/myapp                  main                  2h     chore: bump deps         +0/-0    -
-  1   .claude/worktrees/feat-auth       feat/auth             3d     add OAuth flow           +4/-0    open
-  2   .claude/worktrees/fix-payments    fix/payments          21d    fix stripe webhook       +0/-0    merged
-  3   .claude/worktrees/feat-dashboard  feat/dashboard        8d     WIP: new dashboard       +2/-0    none
-```
-
-### `bonsai new <branch>`
-
-Create a new worktree and branch from the configured base branch.
-
-```bash
-bonsai new feat/search
-bonsai new fix/login --base develop
-bonsai new spike/idea --open
-```
-
-### `bonsai push [branch-or-path]`
-
-Push a worktree branch, optionally create a PR, and optionally remove the worktree afterward.
-
-```bash
-bonsai push
-bonsai push feat/search
-bonsai push --pr
-bonsai push --web
-bonsai push --pr --remove
-bonsai push --pr --remove --yes
-bonsai push --pr --remove --keep-history
-```
-
-`--remove` asks before deleting the worktree. Add `--yes` only when that
-removal has already been approved in an automated workflow.
-
-### `bonsai clean`
-
-Open an interactive picker for merged, stale, or otherwise removable worktrees.
-Commands are repository-local by default. Add `--global` to discover Git
-repositories under common development roots and manage their linked worktrees
-in one view.
-
-```bash
-bonsai clean
-bonsai clean --all
-bonsai clean --global --all
-bonsai clean --global --claude
-bonsai clean --global --claude --keep-history
-bonsai clean --stale 7
-bonsai clean --force
-```
-
-Picker keys: `up/down` or `j/k` move, `space` toggles the highlighted row,
-`a` selects all safe rows, `n` clears the selection, and `enter` opens a final
-review screen. Confirm deletion there with `y` or return with `n`/`esc`.
-
-### `bonsai prune`
-
-Classify merged or inactive worktrees as safe, review, or protected. Automatic
-cleanup only removes safe worktrees and their local branches.
-
-```bash
-bonsai prune
-bonsai prune --dry-run
-bonsai prune --claude
-bonsai prune --global --claude --dry-run
-bonsai prune --global --claude --json
-bonsai prune --global --claude --keep-history --json
-bonsai prune --global --root ~/workspace --dry-run
-bonsai prune --apply <plan-id> --yes
-bonsai prune -y              # safe worktrees only
-```
-
-`--json` saves a plan for 15 minutes. Applying the plan rechecks every local
-fingerprint first and aborts before deletion if any worktree changed.
-`--keep-history` is stored in the plan, so apply preserves each removed
-worktree for recovery.
-
-Every plan reports `reclaimable_bytes`, so an agent can tell you how much disk
-space the cleanup frees before you approve it. Applying returns the matching
-`reclaimed_bytes`.
-
-Global scans are bounded to existing common development directories:
-`~/Github`, `~/GitHub`, `~/Projects`, `~/Developer`, `~/Code`, and `~/src`.
-Use repeatable `--root` flags to choose other locations. Repository-local
-`.bonsai.toml` settings are honored independently during a global scan.
-
-### `bonsai rm <n> [n...]`
-
-Remove worktrees by the numbers shown in `bonsai list`.
-
-```bash
-bonsai rm 2
-bonsai rm 1 3 5
-bonsai rm --dry-run 2
-bonsai rm --force 2
-bonsai rm --keep-history 2
-```
-
-## Undo and trash
-
-Add `--keep-history` to `clean`, `prune`, `rm`, or `push --remove` to make the
-removal recoverable. Bonsai records the branch and commit, staged and unstaged
-binary patches, and non-ignored untracked files.
-
-```bash
-bonsai undo                 # restore the newest removal
-bonsai trash list           # show all recoverable removals
-bonsai trash list --json
-bonsai trash restore <id>   # IDs may be shortened to a unique prefix
-bonsai trash empty --yes    # permanently delete all recovery data
-```
-
-Recovery entries live under `~/.bonsai/trash` and expire after 30 days by
-default. Ignored files, such as dependency directories and build output, are
-not archived. Bonsai refuses to restore over an existing path or a branch that
-has moved to a different commit.
-
-## More Useful Commands
-
-```bash
-bonsai switch      # interactive picker that prints a cd command
-bonsai status      # dashboard view of working tree state
-bonsai stats       # summary across all worktrees
-bonsai sync        # rebase or merge all worktrees from base
-bonsai open 2      # open a worktree in your editor
-bonsai snapshot    # archive a worktree before deleting it
-bonsai doctor      # detect broken or orphaned worktrees
-```
-
-For scripts, CI, and coding agents, the dashboard commands provide structured
-output on stdout without spinner or progress text:
-
-```bash
-bonsai list --json
-bonsai status --json
-bonsai stats --json
-bonsai sync --dry-run --json
-```
-
-`sync --json` reports each non-main worktree as `synced`, `skipped`, or
-`failed`, with a reason or error when applicable.
-
-## Safety Defaults
-
-- Classifies candidates as `safe`, `review`, or `protected`
-- Protects staged, modified, untracked, unpushed, locked, current, and open-PR worktrees
-- Never lets `--yes` or plan/apply delete review or protected worktrees
-- Revalidates saved plans before making any changes
-- Supports opt-in recovery with `--keep-history`, `undo`, and `trash restore`
-- Deletes local branches only for worktrees proven recoverable; never deletes remote branches
-- Supports `--dry-run` on destructive flows
-- Gracefully works without GitHub auth
-- Uses the `gh` CLI instead of managing GitHub tokens directly
-
-## Configuration
-
-Global config lives at `~/.config/bonsai/config.toml`.
-
-```toml
-stale_threshold_days = 14
-default_remote = "origin"
-default_base = "main"
-ticket_pattern = "([A-Z]+-\\d+)"
-trash_retention_days = 30
-```
-
-Per-repo overrides are supported with `.bonsai.toml` at the repo root.
-
-Validate both config layers and print the merged effective values:
-
-```bash
-bonsai config check
-bonsai config check --json
-```
-
-The check reports the exact source and line for invalid TOML or values, and
-warns when it finds unknown keys. Syntax, type, and value errors return a
-non-zero exit code; unknown-key warnings do not.
-
-## GitHub Integration
-
-If `gh` is installed and authenticated, bonsai can:
-
-- show PR status in `bonsai list`
-- detect merged branches for cleanup
-- open PRs from `bonsai push --pr`
-
-Setup:
-
-```bash
-gh auth login
-```
-
-Without `gh`, bonsai still works and falls back to local Git safety checks.
-
-## Plain Output
-
-Bonsai automatically disables ANSI colors when stdout is redirected or piped.
-Set `NO_COLOR` to any non-empty value or pass the global `--no-color` flag to
-force plain output in a terminal:
-
-```bash
-NO_COLOR=1 bonsai list
-bonsai --no-color status
+go test ./...
 ```
 
 ## License
