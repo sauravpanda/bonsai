@@ -1,31 +1,86 @@
 # bonsai
 
-`bonsai` is a friendly CLI for managing git worktrees.
+Safe git worktree cleanup for Claude Code and other coding agents.
 
-If AI coding tools keep spawning branches and worktrees all over a repo, bonsai helps keep things tidy. It shows what exists, what is stale, what has a PR, what still has unpushed work, and what is safe to clean up.
+Coding agents are very good at creating worktrees and very bad at deleting
+them. After a few weeks of agent-assisted work there are dozens scattered
+across your machine, quietly holding tens of gigabytes, and no quick way to
+tell which are merged, which still hold unpushed commits, and which are in use
+right now.
 
-For Claude Code, Bonsai also ships a `/bonsai:cleanup` skill. Claude creates a
-short-lived cleanup plan, explains what will be preserved, asks for approval,
-and applies only the worktrees Bonsai has proven safe.
+Asking an agent to sort that out means asking a language model to assemble
+`git worktree remove --force` and `git branch -D` from whatever it can infer.
+One wrong flag deletes work that exists nowhere else.
 
-## Why bonsai?
+Bonsai moves that decision out of the model. It finds agent worktrees across
+your repositories, classifies each one as `safe`, `review`, or `protected`, and
+removes only the `safe` ones — no matter how the agent asks.
 
-`git worktree` is powerful, but the day-to-day experience is still pretty manual:
+- Finds agent worktrees across every repository on your laptop
+- Classifies each worktree as `safe`, `review`, or `protected`
+- Reports reclaimable disk space before anything is deleted
+- Protects dirty, unpushed, locked, current, in-use, and open-PR worktrees
+- Gives agents structured JSON and a short-lived plan/apply workflow
+- Can preserve every approved removal for `bonsai undo`
 
-- hard to see everything at a glance
-- easy to forget stale worktrees
-- annoying to tell what has been pushed or merged
-- no quick cleanup flow
+## Claude Code quick start
 
-`bonsai` fixes that with a small CLI that feels made for real branch-heavy workflows.
-
-## Install
+Install the binary:
 
 ```bash
 go install github.com/sauravpanda/bonsai@latest
 ```
 
-Or from source:
+Then install the bundled Claude Code plugin:
+
+```text
+/plugin marketplace add sauravpanda/bonsai
+/plugin install bonsai@bonsai-tools
+```
+
+Ask Claude to clean up your worktrees naturally, or run:
+
+```text
+/bonsai:cleanup
+```
+
+Claude will scan the usual development directories, explain what Bonsai will
+remove and preserve, ask for approval, and apply the exact approved plan. The
+plugin enables recovery, so the latest removed worktree can be restored with:
+
+```bash
+bonsai undo
+```
+
+## Other coding agents
+
+Any agent that can run a shell and read JSON can use the same safe protocol:
+
+```bash
+# 1. Create a recoverable, machine-readable cleanup plan.
+bonsai prune --global --keep-history --json
+
+# 2. Let the agent explain the plan and ask you to approve it.
+
+# 3. Apply only that exact plan after approval.
+bonsai prune --apply <plan-id> --yes --json
+
+# 4. Restore the newest removal if you change your mind.
+bonsai undo --json
+```
+
+This works well with Codex, Cursor, OpenCode, Aider, shell-based agents, and
+custom automation. Plans expire after 15 minutes and are revalidated before
+anything is deleted. If a worktree changes after planning, apply stops before
+removing it.
+
+A good agent instruction is:
+
+> Use Bonsai's JSON plan/apply workflow to find safe worktrees globally. Enable
+> keep-history, explain every safe, review, and protected result, ask before
+> applying the plan, and never run raw Git deletion commands.
+
+## Install from source
 
 ```bash
 git clone https://github.com/sauravpanda/bonsai
@@ -38,28 +93,14 @@ Requirements:
 - Go 1.25+
 - Optional: [GitHub CLI](https://cli.github.com/) for PR status and PR creation
 
-### Add the Claude Code skill
-
-After installing the `bonsai` binary, run these commands inside Claude Code:
-
-```text
-/plugin marketplace add sauravpanda/bonsai
-/plugin install bonsai@bonsai-tools
-```
-
-Then ask Claude to clean up naturally, or invoke the skill directly:
-
-```text
-/bonsai:cleanup
-```
-
-## Quick Start
+## Human quick start
 
 ```bash
 bonsai new feat/search
 bonsai list
-bonsai push --pr --remove
-bonsai clean
+bonsai push --pr
+bonsai clean --keep-history
+bonsai undo
 ```
 
 Typical flow:
@@ -68,6 +109,7 @@ Typical flow:
 2. See all active worktrees in one place.
 3. Push and open a PR when the work is ready.
 4. Clean up merged or stale worktrees without guesswork.
+5. Undo a recoverable removal when needed.
 
 ## Core Commands
 
@@ -113,6 +155,7 @@ bonsai push --pr
 bonsai push --web
 bonsai push --pr --remove
 bonsai push --pr --remove --yes
+bonsai push --pr --remove --keep-history
 ```
 
 `--remove` asks before deleting the worktree. Add `--yes` only when that
@@ -130,6 +173,7 @@ bonsai clean
 bonsai clean --all
 bonsai clean --global --all
 bonsai clean --global --claude
+bonsai clean --global --claude --keep-history
 bonsai clean --stale 7
 bonsai clean --force
 ```
@@ -149,6 +193,7 @@ bonsai prune --dry-run
 bonsai prune --claude
 bonsai prune --global --claude --dry-run
 bonsai prune --global --claude --json
+bonsai prune --global --claude --keep-history --json
 bonsai prune --global --root ~/workspace --dry-run
 bonsai prune --apply <plan-id> --yes
 bonsai prune -y              # safe worktrees only
@@ -156,6 +201,12 @@ bonsai prune -y              # safe worktrees only
 
 `--json` saves a plan for 15 minutes. Applying the plan rechecks every local
 fingerprint first and aborts before deletion if any worktree changed.
+`--keep-history` is stored in the plan, so apply preserves each removed
+worktree for recovery.
+
+Every plan reports `reclaimable_bytes`, so an agent can tell you how much disk
+space the cleanup frees before you approve it. Applying returns the matching
+`reclaimed_bytes`.
 
 Global scans are bounded to existing common development directories:
 `~/Github`, `~/GitHub`, `~/Projects`, `~/Developer`, `~/Code`, and `~/src`.
@@ -171,7 +222,27 @@ bonsai rm 2
 bonsai rm 1 3 5
 bonsai rm --dry-run 2
 bonsai rm --force 2
+bonsai rm --keep-history 2
 ```
+
+## Undo and trash
+
+Add `--keep-history` to `clean`, `prune`, `rm`, or `push --remove` to make the
+removal recoverable. Bonsai records the branch and commit, staged and unstaged
+binary patches, and non-ignored untracked files.
+
+```bash
+bonsai undo                 # restore the newest removal
+bonsai trash list           # show all recoverable removals
+bonsai trash list --json
+bonsai trash restore <id>   # IDs may be shortened to a unique prefix
+bonsai trash empty --yes    # permanently delete all recovery data
+```
+
+Recovery entries live under `~/.bonsai/trash` and expire after 30 days by
+default. Ignored files, such as dependency directories and build output, are
+not archived. Bonsai refuses to restore over an existing path or a branch that
+has moved to a different commit.
 
 ## More Useful Commands
 
@@ -204,6 +275,7 @@ bonsai sync --dry-run --json
 - Protects staged, modified, untracked, unpushed, locked, current, and open-PR worktrees
 - Never lets `--yes` or plan/apply delete review or protected worktrees
 - Revalidates saved plans before making any changes
+- Supports opt-in recovery with `--keep-history`, `undo`, and `trash restore`
 - Deletes local branches only for worktrees proven recoverable; never deletes remote branches
 - Supports `--dry-run` on destructive flows
 - Gracefully works without GitHub auth
@@ -218,6 +290,7 @@ stale_threshold_days = 14
 default_remote = "origin"
 default_base = "main"
 ticket_pattern = "([A-Z]+-\\d+)"
+trash_retention_days = 30
 ```
 
 Per-repo overrides are supported with `.bonsai.toml` at the repo root.
