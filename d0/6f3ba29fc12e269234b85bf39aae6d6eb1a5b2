@@ -1,0 +1,28 @@
+README.md
+  s_1d1d00e8adfb17::t_2b2ff941609d6f 207-209
+  s_46448827cae669::t_eb7be5a2afe295 5-9,11-13,15-17,19-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d06f3ba29fc12e269234b85bf39aae6d6eb1a5b2",
+  "prompts": {},
+  "sessions": {
+    "s_1d1d00e8adfb17": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a20ba55-02e6-4736-8e47-7c4eb7291e00",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Saurav Panda <sgp65@cornell.edu>"
+    },
+    "s_46448827cae669": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ebbd95-43cf-42bb-9c26-8d6099000053",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Saurav Panda <sgp65@cornell.edu>"
+    }
+  }
+}
